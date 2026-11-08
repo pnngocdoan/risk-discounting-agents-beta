@@ -1,0 +1,44 @@
+diff --git a/evaluation/eval.py b/evaluation/eval.py
+index e0b17b8..4017a6c 100644
+--- a/evaluation/eval.py
++++ b/evaluation/eval.py
+@@ -84,6 +84,9 @@ elif model_name == 'llama3.1-70b':
+ elif model_name == 'llama3.1-405b':
+     agent_api = LlamaCloudAPI(model_name='meta-llama/llama-3.1-405b-instruct', generation_config=api_model_generation_config)
+ 
++elif model_name.startswith('api:'):
++    agent_api = GenericAPI(model_name=model_name[4:], generation_config=api_model_generation_config)
++
+ # local model
+ elif model_name == 'qwen2.5-7b':
+     model_path = "Qwen/Qwen2.5-7B-Instruct"
+diff --git a/evaluation/model_api/GenericAPI.py b/evaluation/model_api/GenericAPI.py
+new file mode 100644
+index 0000000..027016e
+--- /dev/null
++++ b/evaluation/model_api/GenericAPI.py
+@@ -0,0 +1,12 @@
++import os
++import sys
++sys.path.append('./model_api')
++from openai import OpenAI
++from OpenaiAPI import OpenaiAPI
++
++
++class GenericAPI(OpenaiAPI):
++    """Any OpenAI-compatible service. Reads RDA_BASE_URL and RDA_API_KEY from the environment."""
++    def __init__(self, model_name, generation_config={}):
++        super().__init__(model_name, generation_config)
++        self.client = OpenAI(base_url=os.environ['RDA_BASE_URL'], api_key=os.environ['RDA_API_KEY'])
+diff --git a/evaluation/model_api/__init__.py b/evaluation/model_api/__init__.py
+index 7d0a773..f537cb0 100644
+--- a/evaluation/model_api/__init__.py
++++ b/evaluation/model_api/__init__.py
+@@ -1,6 +1,7 @@
+ from .GLM4API import GLM4API
+ from .Llama3API import Llama3API
+ from .OpenaiAPI import OpenaiAPI
++from .GenericAPI import GenericAPI
+ from .QwenAPI import QwenAPI
+ from .ClaudeAPI import ClaudeAPI
+ from .GeminiAPI import GeminiAPI

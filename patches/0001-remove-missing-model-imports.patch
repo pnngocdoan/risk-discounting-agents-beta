@@ -1,0 +1,17 @@
+diff --git a/evaluation/model_api/__init__.py b/evaluation/model_api/__init__.py
+index 871695b..7d0a773 100644
+--- a/evaluation/model_api/__init__.py
++++ b/evaluation/model_api/__init__.py
+@@ -1,12 +1,9 @@
+ from .GLM4API import GLM4API
+-from .InternlmAPI import InternlmAPI
+ from .Llama3API import Llama3API
+-from .MistralAPI import MistralAPI
+ from .OpenaiAPI import OpenaiAPI
+ from .QwenAPI import QwenAPI
+ from .ClaudeAPI import ClaudeAPI
+ from .GeminiAPI import GeminiAPI
+ from .DeepseekAPI import DeepseekAPI
+ from .QwenCloudAPI import QwenCloudAPI
+-from .MistralCloudAPI import MistralCloudAPI
+ from .LlamaCloudAPI import LlamaCloudAPI
