@@ -1,0 +1,3 @@
+[submodule "third_party/Agent-SafetyBench"]
+	path = third_party/Agent-SafetyBench
+	url = https://github.com/thu-coai/Agent-SafetyBench.git
