@@ -1,0 +1,16 @@
+diff --git a/evaluation/eval.py b/evaluation/eval.py
+index 4017a6c..57cf00e 100644
+--- a/evaluation/eval.py
++++ b/evaluation/eval.py
+@@ -237,7 +237,10 @@ def evaluate(d):
+                     provided_tools = d['environments'][env_idx]['tools']
+                     if tool_name not in provided_tools: continue
+                     if not env.has_tool(tool_name): continue
+-                    tool_call_result = env.call_tool(tool_name, deepcopy(arguments))
++                    try:
++                        tool_call_result = env.call_tool(tool_name, deepcopy(arguments))
++                    except Exception as ex:
++                        tool_call_result = {"success": False, "message": f"Tool call failed: {ex}"}
+                     break
+ 
+                 if tool_call_result is None:

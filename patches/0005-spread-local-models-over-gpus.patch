@@ -1,0 +1,26 @@
+diff --git a/evaluation/model_api/Llama3API.py b/evaluation/model_api/Llama3API.py
+index 665004a..ec29ed2 100644
+--- a/evaluation/model_api/Llama3API.py
++++ b/evaluation/model_api/Llama3API.py
+@@ -18,7 +18,7 @@ class Llama3API(BaseAPI):
+         self.device = torch.device('cuda')
+         print('loading model...')
+         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
+-        self.model = AutoModelForCausalLM.from_pretrained(model_path, trust_remote_code=True, torch_dtype=torch.float16).to(self.device).eval()
++        self.model = AutoModelForCausalLM.from_pretrained(model_path, trust_remote_code=True, torch_dtype=torch.float16, device_map='auto').eval()
+         self.tokenizer.padding_side = 'left'
+         print('finish loading')
+         self.sys_prompt = self.basic_sys_prompt
+diff --git a/evaluation/model_api/QwenAPI.py b/evaluation/model_api/QwenAPI.py
+index c681520..1b693c2 100644
+--- a/evaluation/model_api/QwenAPI.py
++++ b/evaluation/model_api/QwenAPI.py
+@@ -19,7 +19,7 @@ class QwenAPI(BaseAPI):
+         # if 'temperature' not in self.generation_config:
+         #     self.generation_config['temperature'] = 1.0
+         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_path, trust_remote_code=True)
+-        self.model = AutoModelForCausalLM.from_pretrained(model_path, trust_remote_code=True, torch_dtype=torch.float16).to(self.device).eval()
++        self.model = AutoModelForCausalLM.from_pretrained(model_path, trust_remote_code=True, torch_dtype=torch.float16, device_map='auto').eval()
+         self.tokenizer.padding_side = 'left'
+         print('finish loading')
+ 

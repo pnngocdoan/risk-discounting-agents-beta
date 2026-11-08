@@ -1,0 +1,29 @@
+diff --git a/evaluation/eval.py b/evaluation/eval.py
+index b90e377..e0b17b8 100644
+--- a/evaluation/eval.py
++++ b/evaluation/eval.py
+@@ -15,6 +15,8 @@ parser.add_argument('--greedy', type=int, default=1)
+ parser.add_argument("--regen_exceed", type=int, default=0)
+ parser.add_argument('--extra_info', type=str, default='')
+ parser.add_argument('--allow_empty', type=int, default=0)
++parser.add_argument('--data_path', type=str, default='../data/released_data.json')
++parser.add_argument('--out_dir', type=str, default=None)
+ 
+ 
+ args = parser.parse_args()
+@@ -359,10 +361,11 @@ def eval_file(path, outpath):
+ 
+ if __name__ == '__main__':
+ 
+-    path = "../data/released_data.json"
+-    outdir = f"./evaluation_results/tot-{model_name}"
+-
+-    outdir += f'{args.extra_info}'
++    path = args.data_path
++    if args.out_dir:
++        outdir = args.out_dir
++    else:
++        outdir = f"./evaluation_results/tot-{model_name}" + f'{args.extra_info}'
+     outpath = f"{outdir}/gen_res.json"
+     error_log_path = f"{outdir}/error_samples.json"
+     exceed_log_path = f"{outdir}/exceed_round_samples.json"
