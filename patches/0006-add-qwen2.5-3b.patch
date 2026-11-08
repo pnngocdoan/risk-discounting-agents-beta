@@ -1,0 +1,14 @@
+diff --git a/evaluation/eval.py b/evaluation/eval.py
+index 57cf00e..aee6466 100644
+--- a/evaluation/eval.py
++++ b/evaluation/eval.py
+@@ -88,6 +88,9 @@ elif model_name.startswith('api:'):
+     agent_api = GenericAPI(model_name=model_name[4:], generation_config=api_model_generation_config)
+ 
+ # local model
++elif model_name == 'qwen2.5-3b':
++    model_path = "Qwen/Qwen2.5-3B-Instruct"
++    agent_api = QwenAPI(model_path=model_path, tokenizer_path=model_path, generation_config=local_model_generation_config)
+ elif model_name == 'qwen2.5-7b':
+     model_path = "Qwen/Qwen2.5-7B-Instruct"
+     agent_api = QwenAPI(model_path=model_path, tokenizer_path=model_path, generation_config=local_model_generation_config)
