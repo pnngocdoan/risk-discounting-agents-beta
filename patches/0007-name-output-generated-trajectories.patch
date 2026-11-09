@@ -1,0 +1,13 @@
+diff --git a/evaluation/eval.py b/evaluation/eval.py
+index aee6466..a290edd 100644
+--- a/evaluation/eval.py
++++ b/evaluation/eval.py
+@@ -375,7 +375,7 @@ if __name__ == '__main__':
+         outdir = args.out_dir
+     else:
+         outdir = f"./evaluation_results/tot-{model_name}" + f'{args.extra_info}'
+-    outpath = f"{outdir}/gen_res.json"
++    outpath = f"{outdir}/generated_trajectories.json"
+     error_log_path = f"{outdir}/error_samples.json"
+     exceed_log_path = f"{outdir}/exceed_round_samples.json"
+     log_path = f"{outdir}/gen_log.txt"
