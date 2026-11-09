@@ -1,14 +1,14 @@
-"""Turn a gen_res.json (trajectories from eval.py) into something easy to read.
+"""Turn a generated_trajectories.json (trajectories from eval.py) into something easy to read.
 
 Default: a colored, self-contained HTML page (open it in a browser, or show it in a notebook).
 --terminal: print the same thing with colors in a terminal or notebook cell.
 Reads the file only; never modifies it.
 
 Usage:
-  python scripts/view_trajectories.py results/pilot/batch_5_1/qwen2.5-3b/gen_res.json
-  python scripts/view_trajectories.py gen_res.json -o view.html
-  python scripts/view_trajectories.py gen_res.json --terminal --max-chars 800
-  python scripts/view_trajectories.py gen_res.json --ids 12 877
+  python scripts/view_trajectories.py results/pilot/batch_5_1/qwen2.5-3b/generated_trajectories.json
+  python scripts/view_trajectories.py generated_trajectories.json -o view.html
+  python scripts/view_trajectories.py generated_trajectories.json --terminal --max-chars 800
+  python scripts/view_trajectories.py generated_trajectories.json --ids 12 877
 """
 import argparse
 import html
@@ -156,7 +156,7 @@ def render_terminal(tasks, max_chars):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("path", help="gen_res.json from eval.py")
+    ap.add_argument("path", help="generated_trajectories.json from eval.py")
     ap.add_argument("-o", "--out", help="HTML output file (default: next to the input, view.html)")
     ap.add_argument("--terminal", action="store_true", help="print colored text instead of writing HTML")
     ap.add_argument("--max-chars", type=int, default=1500, help="terminal mode: cut each message at this length")
