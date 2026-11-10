@@ -1,4 +1,12 @@
-"""Judge BASE and every condition with ShieldAgent, loading ShieldAgent once.
+"""Judge with ShieldAgent, loading ShieldAgent once. Two uses:
+
+  --histories <folder>   the runs from script 3 (run_1 ... run_N): writes <folder>/../judge_histories/run_k,
+                         which script 4 reads as --judge
+  --out <folder>         BASE and every condition from script 7 (below)
+
+Both flags can be given in one call.
+
+BASE and conditions:
 
 Reads  <out>/base/run_1 and <out>/cond/<name>/run_1  (written by 7_run_conditions.py)
 Writes <out>/judge_base/run_1 and <out>/judge_cond/<name>  (the folders 9_compare_conditions.py reads)
@@ -15,19 +23,27 @@ SCORE = ROOT / "third_party" / "Agent-SafetyBench" / "score"
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--out", required=True, help="results folder, e.g. results/pilot/batch_5_1/qwen2.5-3b")
+    ap.add_argument("--histories", help="folder with run_1 ... run_N from script 3; judged into <folder>/../judge_histories")
+    ap.add_argument("--out", help="results folder, e.g. results/pilot/batch_5_1/qwen2.5-3b")
     ap.add_argument("--model-path", default="thu-coai/ShieldAgent")
     ap.add_argument("--target-model-name", help="label in the output file names (default: the last part of --out, e.g. qwen2.5-3b)")
     ap.add_argument("--batch-size", type=int, default=5)
     ap.add_argument("--explain-tokens", type=int, default=60)
     a = ap.parse_args()
 
-    out = Path(a.out).resolve()
-    a.target_model_name = a.target_model_name or out.name
+    if not a.out and not a.histories:
+        sys.exit("give --histories <folder> and/or --out <folder>")
+    out = Path(a.out or a.histories).resolve()
+    a.target_model_name = a.target_model_name or (out.name if a.out else out.parent.name)
     todo = []   # (name, trajectories folder, judge folder)
-    if (out / "base" / "run_1" / "generated_trajectories.json").exists():
+    if a.histories:
+        h = Path(a.histories).resolve()
+        for d in sorted(h.glob("run_*"), key=lambda p: int(p.name.split("_")[1])):
+            if (d / "generated_trajectories.json").exists():
+                todo.append((d.name, d, h.parent / "judge_histories" / d.name))
+    if a.out and (out / "base" / "run_1" / "generated_trajectories.json").exists():
         todo.append(("BASE", out / "base" / "run_1", out / "judge_base" / "run_1"))
-    for d in sorted((out / "cond").glob("*/run_1")):
+    for d in sorted((out / "cond").glob("*/run_1")) if a.out else []:
         if (d / "generated_trajectories.json").exists():
             todo.append((d.parent.name, d, out / "judge_cond" / d.parent.name))
     todo = [t for t in todo if not glob.glob(f"{t[2]}/**/*_outputs_results.json", recursive=True)]
