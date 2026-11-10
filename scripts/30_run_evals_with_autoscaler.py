@@ -147,12 +147,19 @@ def start_server(hf_id, name, gpu, port, max_len, gpu_mem, log_dir):
     return proc, log
 
 
-def wait_for_server(proc, port, log, minutes=15):
-    for _ in range(minutes * 12):
+def wait_for_server(proc, port, log, minutes=20):
+    """Wait until the server answers, printing its latest log line every 30 s so the wait is visible."""
+    t0, shown = time.time(), ""
+    for n in range(minutes * 12):
         if proc.poll() is not None:
             sys.exit(f"the model server on port {port} stopped while loading; last lines of {log}:\n" + "".join(log.read_text().splitlines(True)[-15:]))
         if reachable(f"http://127.0.0.1:{port}/v1") is None:
+            print(f"  server on port {port} is up after {time.time() - t0:.0f} s")
             return
+        if n % 6 == 0:
+            lines = [l.strip() for l in log.read_text(errors="replace").replace("\r", "\n").splitlines() if l.strip()]
+            last = lines[-1][:160] if lines else "(no output yet: starting up)"
+            print(f"  [{time.time() - t0:.0f} s] port {port}: {last}", flush=True)
         time.sleep(5)
     sys.exit(f"the model server on port {port} did not come up in {minutes} min; see {log}")
 
@@ -248,7 +255,7 @@ def main():
             for g in range(gpus):
                 proc, log = start_server(a.model, name, g, 8000 + g, a.max_len, a.gpu_mem, out)
                 procs.append((proc, 8000 + g, log))
-            print(f"starting {a.model} on {gpus} GPU(s); loading can take several minutes")
+            print(f"starting {a.model} on {gpus} GPU(s); the first time it downloads the model (about 6 GB for a 3B model), then loads it. Progress below; full logs: {out}/vllm_gpu*.log")
             for proc, port, log in procs:
                 wait_for_server(proc, port, log)
                 servers.append((f"http://127.0.0.1:{port}/v1", "none"))
