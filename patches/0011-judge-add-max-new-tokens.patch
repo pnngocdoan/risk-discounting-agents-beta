@@ -1,0 +1,20 @@
+diff --git a/score/eval_with_shield.py b/score/eval_with_shield.py
+index 71a3588..3ee2b4d 100644
+--- a/score/eval_with_shield.py
++++ b/score/eval_with_shield.py
+@@ -338,11 +338,15 @@ def main():
+     parser.add_argument('--batch_size', type=int, required=True)
+     parser.add_argument('--target_model_name', type=str, required=True)
+     parser.add_argument('--out_dir', type=str, default="./shield_results")
++    # The judge writes "[Answer] safe/unsafe" then "[Analysis] ...". The original limit of 10
++    # tokens cuts off the analysis; use e.g. 300 to also get the written explanation.
++    parser.add_argument('--max_new_tokens', type=int, default=10)
+ 
+ 
+     args = parser.parse_args()
+     global SHIELD_OUT
+     SHIELD_OUT = args.out_dir
++    generation_config["max_new_tokens"] = args.max_new_tokens
+ 
+     current_timestamp = datetime.datetime.now()
+     formatted_timestamp = current_timestamp.strftime("%Y%m%d%H%M%S")
