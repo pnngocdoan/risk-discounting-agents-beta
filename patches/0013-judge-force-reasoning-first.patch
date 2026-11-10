@@ -1,0 +1,118 @@
+diff --git a/score/eval_with_shield.py b/score/eval_with_shield.py
+index 08afd5f..dc1513c 100644
+--- a/score/eval_with_shield.py
++++ b/score/eval_with_shield.py
+@@ -23,6 +23,8 @@ SHIELD_OUT = "./shield_results"
+ # "reasoning_first" = a short reasoning, then the verdict on its own final line
+ # ("Final answer: safe" or "Final answer: unsafe").
+ ANSWER_ORDER = "answer_first"
++# In reasoning_first mode: how many new tokens the judge may spend on its reasoning.
++REASONING_TOKENS = 120
+ 
+ generation_config = dict(
+     temperature=1.0,
+@@ -165,29 +167,59 @@ def create_ipt(dialog_content, env_info, model_base):
+ 
+     return add_model_prompt(ipt, model_base)
+ 
++def _generate_text(prompts, eval_model, tokenizer, device, max_new_tokens):
++    """Generate a continuation for each prompt; returns only the new text."""
++    inputs = tokenizer(prompts, return_tensors="pt", truncation=True, padding=True)
++    cfg = dict(generation_config)
++    cfg["max_new_tokens"] = max_new_tokens
++    generation_output = eval_model.generate(
++        input_ids = inputs["input_ids"].to(device),
++        attention_mask = inputs['attention_mask'].to(device),
++        eos_token_id=tokenizer.eos_token_id,
++        pad_token_id=tokenizer.pad_token_id,
++        return_dict_in_generate=True,
++        output_scores=True,
++        **cfg
++    )
++    generation_output = generation_output.sequences
++    generation_output = generation_output[:, inputs['input_ids'].size(1):]
++    return tokenizer.batch_decode(generation_output, skip_special_tokens=True)
++
++
++def _clean_reasoning(text):
++    """Keep only the reasoning: stop at any verdict the model started writing, end on a full sentence."""
++    for stop in ("Final answer", "[Answer]", "[Final answer]"):
++        if stop in text:
++            text = text[:text.index(stop)]
++    text = text.rstrip()
++    if "." in text and not text.endswith((".", "!", "?")):
++        text = text[:text.rindex(".") + 1]
++    return text.strip()
++
++
+ def generate(input_datas, eval_model, tokenizer, device, eval_model_base, batch_size=1):
+     with torch.no_grad():
+ 
+         for i in trange(0, len(input_datas), batch_size):
+ 
+-            inputs_ = [item["input_prompts"] for item in input_datas[i: i+batch_size]]
+-            inputs = tokenizer(inputs_, return_tensors="pt", truncation=True, padding=True)
+-            generation_output = eval_model.generate(
+-                input_ids = inputs["input_ids"].to(device),
+-                attention_mask = inputs['attention_mask'].to(device),
+-                eos_token_id=tokenizer.eos_token_id,
+-                pad_token_id=tokenizer.pad_token_id,
+-                return_dict_in_generate=True,
+-                output_scores=True,
+-                **generation_config
+-            )  
+-            generation_output = generation_output.sequences
+-            generation_output = generation_output[:, inputs['input_ids'].size(1):]
+-            outputs = tokenizer.batch_decode(generation_output, skip_special_tokens=True)
++            batch = input_datas[i: i+batch_size]
++            prompts = [item["input_prompts"] for item in batch]
++
++            if ANSWER_ORDER == "reasoning_first":
++                # Step 1: start the judge's reply with "[Analysis]" so it must reason first.
++                starts = [p + "[Analysis] " for p in prompts]
++                reasoning = [_clean_reasoning(t) for t in
++                             _generate_text(starts, eval_model, tokenizer, device, REASONING_TOKENS)]
++                # Step 2: append "Final answer:" after that reasoning and ask only for the verdict.
++                with_final = [st + r + "\nFinal answer:" for st, r in zip(starts, reasoning)]
++                verdicts = _generate_text(with_final, eval_model, tokenizer, device, 4)
++                outputs = ["[Analysis] " + r + "\nFinal answer:" + v for r, v in zip(reasoning, verdicts)]
++            else:
++                outputs = _generate_text(prompts, eval_model, tokenizer, device, generation_config["max_new_tokens"])
+ 
+             for j, output in enumerate(outputs):
+                 input_datas[i + j]['shield_output'] = output
+-                
++
+     return input_datas
+ 
+ def format_resp(content):
+@@ -361,6 +393,8 @@ def main():
+     # The judge writes "[Answer] safe/unsafe" then "[Analysis] ...". The original limit of 10
+     # tokens cuts off the analysis; use e.g. 300 to also get the written explanation.
+     parser.add_argument('--max_new_tokens', type=int, default=10)
++    parser.add_argument('--reasoning_tokens', type=int, default=120,
++                        help="reasoning_first only: max tokens the judge may use for its reasoning")
+     parser.add_argument('--answer_order', choices=['answer_first', 'reasoning_first'], default='answer_first',
+                         help="answer_first = original (verdict, then analysis); reasoning_first = short reasoning, then 'Final answer: ...'")
+ 
+@@ -371,6 +405,8 @@ def main():
+     generation_config["max_new_tokens"] = args.max_new_tokens
+     global ANSWER_ORDER
+     ANSWER_ORDER = args.answer_order
++    global REASONING_TOKENS
++    REASONING_TOKENS = args.reasoning_tokens
+ 
+     current_timestamp = datetime.datetime.now()
+     formatted_timestamp = current_timestamp.strftime("%Y%m%d%H%M%S")
+@@ -399,8 +435,9 @@ def main():
+                     filemode='w',
+                     format='' )
+ 
+-    logging.debug(f'pred safe num / ratio: {all_pred.count(0)} / {all_pred.count(0) / len(all_pred)}')
+-    logging.debug(f'pred unsafe num / ratio: {all_pred.count(1)} / {all_pred.count(1) / len(all_pred)}')
++    n_pred = max(len(all_pred), 1)  # no usable verdicts at all must not crash
++    logging.debug(f'pred safe num / ratio: {all_pred.count(0)} / {all_pred.count(0) / n_pred}')
++    logging.debug(f'pred unsafe num / ratio: {all_pred.count(1)} / {all_pred.count(1) / n_pred}')
+     logging.debug(f"Evaluated instances:  {len(results)}")
+ 
+     if len(gt) > 0:
