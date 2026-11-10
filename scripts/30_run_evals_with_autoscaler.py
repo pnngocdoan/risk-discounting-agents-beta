@@ -57,6 +57,33 @@ def gpu_count():
         return 0
 
 
+def ram_available_gb():
+    """RAM the machine can still hand out, in GB (Linux /proc/meminfo)."""
+    try:
+        for line in open("/proc/meminfo"):
+            if line.startswith("MemAvailable:"):
+                return int(line.split()[1]) / 1024 / 1024
+    except Exception:
+        pass
+    return None
+
+
+def cpu_times():
+    """(idle, total) CPU time counters from /proc/stat, to work out how busy the CPU was between two readings."""
+    try:
+        f = [int(x) for x in open("/proc/stat").readline().split()[1:]]
+        return f[3] + f[4], sum(f)
+    except Exception:
+        return None
+
+
+def jobs_that_fit_in_ram(avail_gb, per_job_gb, reserve_gb):
+    """How many jobs fit in the RAM that is free, keeping a reserve so nothing gets killed."""
+    if avail_gb is None:
+        return 10 ** 6
+    return max(1, int((avail_gb - reserve_gb) / per_job_gb))
+
+
 class GpuSampler(threading.Thread):
     """Samples nvidia-smi (and the vLLM gauges, if given) every few seconds.
 
@@ -72,13 +99,27 @@ class GpuSampler(threading.Thread):
 
     def new_batch(self):
         self.b_utils, self.b_wait, self.b_cache, self.b_mem = [], 0.0, 0.0, 0
+        self.b_ram_min, self.b_cpu = float("inf"), []
+        self._cpu_prev = cpu_times()
 
     def batch_summary(self):
+        ram = ram_available_gb()          # one more reading at the end, so a short batch still has numbers
+        if ram is not None:
+            self.b_ram_min = min(self.b_ram_min, ram)
         return dict(avg_util_pct=round(sum(self.b_utils) / len(self.b_utils)) if self.b_utils else None,
-                    peak_waiting=self.b_wait, peak_cache_usage=round(self.b_cache, 3), peak_mem_mib=self.b_mem)
+                    peak_waiting=self.b_wait, peak_cache_usage=round(self.b_cache, 3), peak_mem_mib=self.b_mem,
+                    min_ram_free_gb=round(self.b_ram_min, 1) if self.b_ram_min != float("inf") else None,
+                    avg_cpu_pct=round(sum(self.b_cpu) / len(self.b_cpu)) if self.b_cpu else None)
 
     def run(self):
         while not self.stop_flag.is_set():
+            ram = ram_available_gb()
+            if ram is not None:
+                self.b_ram_min = min(self.b_ram_min, ram)
+            now = cpu_times()
+            if now and self._cpu_prev and now[1] > self._cpu_prev[1]:
+                self.b_cpu.append(100 * (1 - (now[0] - self._cpu_prev[0]) / (now[1] - self._cpu_prev[1])))
+            self._cpu_prev = now
             try:
                 out = subprocess.run(["nvidia-smi", "--query-gpu=index,utilization.gpu,memory.used", "--format=csv,noheader,nounits"],
                                      capture_output=True, text=True, check=True).stdout
@@ -147,12 +188,19 @@ def start_server(hf_id, name, gpu, port, max_len, gpu_mem, log_dir):
     return proc, log
 
 
-def wait_for_server(proc, port, log, minutes=15):
-    for _ in range(minutes * 12):
+def wait_for_server(proc, port, log, minutes=20):
+    """Wait until the server answers, printing its latest log line every 30 s so the wait is visible."""
+    t0, shown = time.time(), ""
+    for n in range(minutes * 12):
         if proc.poll() is not None:
             sys.exit(f"the model server on port {port} stopped while loading; last lines of {log}:\n" + "".join(log.read_text().splitlines(True)[-15:]))
         if reachable(f"http://127.0.0.1:{port}/v1") is None:
+            print(f"  server on port {port} is up after {time.time() - t0:.0f} s")
             return
+        if n % 6 == 0:
+            lines = [l.strip() for l in log.read_text(errors="replace").replace("\r", "\n").splitlines() if l.strip()]
+            last = lines[-1][:160] if lines else "(no output yet: starting up)"
+            print(f"  [{time.time() - t0:.0f} s] port {port}: {last}", flush=True)
         time.sleep(5)
     sys.exit(f"the model server on port {port} did not come up in {minutes} min; see {log}")
 
@@ -204,7 +252,7 @@ def merge(out, tasks, repeats):
                 missing.append(t["id"])
         (out / f"run_{k}").mkdir(parents=True, exist_ok=True)
         (out / f"run_{k}" / "generated_trajectories.json").write_text(json.dumps(merged, indent=1, ensure_ascii=False))
-        print(f"run_{k}: {len(merged)} task(s) merged" + (f", MISSING {missing}" if missing else ""))
+        print(f"repeat {k} of {repeats}: {len(merged)} of {len(tasks)} tasks saved together in {out}/run_{k}/generated_trajectories.json" + (f"  (MISSING tasks {missing}: their job failed)" if missing else ""))
 
 
 def main():
@@ -215,6 +263,9 @@ def main():
     ap.add_argument("--repeats", type=int, default=6)
     ap.add_argument("--start-per-gpu", type=int, default=None, help="jobs per GPU in the first batch (default: what vLLM says fits, rounded up)")
     ap.add_argument("--max-per-gpu", type=int, default=32, help="the batch size never grows past this many jobs per GPU")
+    ap.add_argument("--job-ram-gb", type=float, default=0.8, help="RAM one job is assumed to need for the first batch (measured after that)")
+    ap.add_argument("--ram-reserve-gb", type=float, default=3.0, help="RAM always left free so the machine does not kill jobs")
+    ap.add_argument("--jobs-per-core", type=int, default=8, help="most jobs per CPU core in one batch (jobs mostly wait on the model)")
     ap.add_argument("--no-autoscale", action="store_true", help="keep every batch the same size as the first")
     ap.add_argument("--cache-limit", type=float, default=0.85, help="hold the size when the conversation space got fuller than this")
     ap.add_argument("--max-len", type=int, default=12288, help="longest conversation the server accepts (tokens)")
@@ -248,31 +299,41 @@ def main():
             for g in range(gpus):
                 proc, log = start_server(a.model, name, g, 8000 + g, a.max_len, a.gpu_mem, out)
                 procs.append((proc, 8000 + g, log))
-            print(f"starting {a.model} on {gpus} GPU(s); loading can take several minutes")
+            print(f"starting {a.model} on {gpus} GPU(s); the first time it downloads the model (about 6 GB for a 3B model), then loads it. Progress below; full logs: {out}/vllm_gpu*.log")
             for proc, port, log in procs:
                 wait_for_server(proc, port, log)
                 servers.append((f"http://127.0.0.1:{port}/v1", "none"))
             conc = [reported_concurrency(log) for _, _, log in procs]
             known = [c for c in conc if c]
             per_gpu = a.start_per_gpu or (max(2, math.ceil(min(known))) if known else 4)
-            print(f"each server reports room for {known or 'an unknown number of'} full-length conversations; first batch: {per_gpu} jobs per GPU")
+            print(f"each GPU's server says it has room for {known or 'an unknown number of'} full-length conversations at once, so the first batch is {per_gpu} jobs per GPU")
             report["vllm_reported_concurrency"] = conc
 
         n_srv = len(servers)
         level = per_gpu * n_srv                      # jobs in the current batch
         cap = a.max_per_gpu * n_srv
+        cores = os.cpu_count() or 1
+        cpu_cap = cores * a.jobs_per_core
+        avail0 = ram_available_gb()
+        ram_cap = jobs_that_fit_in_ram(avail0, a.job_ram_gb, a.ram_reserve_gb)
+        gpu_level = level
+        level = min(level, ram_cap, cpu_cap)
+        limit = "the GPUs" if level == gpu_level else ("the RAM" if level == ram_cap else "the CPU cores")
+        print(f"this machine: {cores} CPU cores, {avail0 and round(avail0)} GB RAM free. The GPUs could take {gpu_level} jobs, the RAM {ram_cap}, the CPU cores {cpu_cap}; "
+              f"starting with {level}, limited by {limit}.")
         can_scale = not a.no_autoscale and bool(procs)   # gauges exist only for servers we started
         metrics = [u.rsplit("/v1", 1)[0] + "/metrics" for u, _ in servers] if procs else []
         sampler = GpuSampler(metrics)
         sampler.start()
         pending = list(jobs)
-        print(f"{len(tasks)} tasks x {a.repeats} repeats = {len(jobs)} jobs; first batch {min(level, len(pending))} jobs" + ("" if can_scale else " (fixed size)"))
+        print(f"{len(tasks)} tasks x {a.repeats} repeats = {len(jobs)} jobs (one job = one task in one repeat). First batch: {min(level, len(pending))} jobs at the same time" + ("" if can_scale else " (fixed size)") + ". Each line below is one finished job.")
         t0 = time.time()
         failed, rows, log_rows, good, frozen, batch_no, done = 0, [], [], level, False, 0, 0
         while pending:
             batch, pending = pending[:level], pending[level:]
             batch_no += 1
             sampler.new_batch()
+            avail_before = ram_available_gb()
             tb = time.time()
             nfail = 0
             with ThreadPoolExecutor(max_workers=len(batch)) as ex:
@@ -282,25 +343,35 @@ def main():
                     rows.append((k, tid, round(secs, 1), status))
                     nfail += status not in ("ok", "skipped")
                     done += 1
-                    print(f"[{done}/{len(jobs)}] run {k} task {tid}: {status} ({secs:.0f} s)")
+                    print(f"[{done}/{len(jobs)} jobs finished] task {tid}, repeat {k} of {a.repeats}: {status} ({secs:.0f} s)")
             failed += nfail
             bs = sampler.batch_summary()
             secs_b = time.time() - tb
+            # RAM one job really used in this batch, and how many jobs the free RAM can carry next
+            observed = max(0.3, (avail_before - bs["min_ram_free_gb"]) / len(batch)) if avail_before is not None and bs["min_ram_free_gb"] is not None else a.job_ram_gb
+            ram_next = jobs_that_fit_in_ram(ram_available_gb(), observed, a.ram_reserve_gb)
             # decide the next batch size from what this batch did
             if not can_scale or frozen or not pending:
-                decision, nxt = "fixed" if not can_scale else ("kept" if pending else "last batch"), level
+                decision, nxt = "fixed" if not can_scale else ("same size" if pending else "none, no jobs left"), level
             elif nfail:
-                decision, nxt, frozen = f"{nfail} job(s) failed: back to {good}, stop growing", good, True
+                decision, nxt, frozen = f"{nfail} job(s) failed, so go back to {good} jobs and stop growing", good, True
+            elif bs["min_ram_free_gb"] is not None and bs["min_ram_free_gb"] < a.ram_reserve_gb:
+                decision, nxt, frozen = f"the RAM nearly ran out (only {bs['min_ram_free_gb']} GB free), so use {ram_next} jobs and stop growing", ram_next, True
             elif bs["peak_waiting"] > 0 or bs["peak_cache_usage"] > a.cache_limit:
-                decision, nxt, frozen = "at capacity (requests waited or conversation space nearly full): hold", level, True
+                decision, nxt, frozen = "the GPUs are at their limit (requests waited or the conversation space is nearly full), so keep the same size", level, True
             else:
                 good = level
-                nxt = min(cap, math.ceil(level * 1.5))
-                decision = f"room left: grow to {nxt}" if nxt > level else "at the maximum"
+                want = math.ceil(level * 1.5)
+                nxt = min(cap, cpu_cap, ram_next, want)
+                why = "" if nxt == want else (" (limited by the RAM)" if nxt == ram_next else " (limited by the CPU cores)" if nxt == cpu_cap else " (the maximum)")
+                decision = f"there is room left, so grow to {nxt} jobs{why}" if nxt > level else f"cannot grow{why or ' (already at the maximum)'}"
             log_rows.append(dict(batch=batch_no, jobs=len(batch), seconds=round(secs_b), jobs_per_min=round(len(batch) / secs_b * 60, 2),
-                                 failed=nfail, next_size=nxt, decision=decision, **bs))
-            print(f"batch {batch_no}: {len(batch)} jobs in {secs_b:.0f} s, util {bs['avg_util_pct']}%, space used {bs['peak_cache_usage']}, "
-                  f"waiting {bs['peak_waiting']}, failed {nfail} -> {decision}")
+                                 failed=nfail, next_size=nxt, decision=decision, ram_per_job_gb=round(observed, 2), **bs))
+            space = f"{bs['peak_cache_usage'] * 100:.0f}%"
+            print(f"  CPU was {bs['avg_cpu_pct'] if bs['avg_cpu_pct'] is not None else 'n/a'}% busy on average; the lowest free RAM was {bs['min_ram_free_gb']} GB (each job used about {observed:.2f} GB, never counted below 0.3 GB).")
+            print(f"batch {batch_no} done: {len(batch)} jobs started together took {secs_b:.0f} s. GPUs were busy {bs['avg_util_pct']}% of the time, "
+                  f"the model's conversation space was at most {space} full, {bs['peak_waiting']:.0f} request(s) had to wait, {nfail} job(s) failed.")
+            print(f"  next batch: {decision}")
             level = nxt
         wall = time.time() - t0
         gpu_stats = sampler.finish()
@@ -330,9 +401,9 @@ def main():
             w.writerows(log_rows)
 
     merge(out, tasks, a.repeats)
-    print(f"done in {wall / 60:.1f} min wall-clock, {report['gpu_hours']} GPU-hours; {failed} failed job(s)")
+    print(f"done: {len(jobs) - failed} of {len(jobs)} jobs succeeded in {wall / 60:.1f} min ({report['gpu_hours']} GPU-hours = minutes x GPUs); {failed} failed")
     for g, s in gpu_stats.items():
-        print(f"  GPU {g}: peak memory {s['peak_mem_mib']} MiB, average utilization {s['avg_util_pct']}%")
+        print(f"  GPU {g}: highest memory used {s['peak_mem_mib']} MiB, busy {s['avg_util_pct']}% of the time on average")
     sys.exit(1 if failed else 0)
 
 
