@@ -25,7 +25,7 @@ Layout written under --out:
 Finished jobs are skipped on a restart.
 
 Usage (from the repo root, after scripts/apply_bug_fixes.sh and `pip install vllm`):
-  python scripts/30_autoscaler.py --model Qwen/Qwen2.5-3B-Instruct \
+  python scripts/30_autoscaling_inference.py --model Qwen/Qwen2.5-3B-Instruct \
       --batch data/batches/batch_5_1.json --out results/pilot/batch_5_1/qwen2.5-3b/histories
 """
 import argparse
