@@ -15,9 +15,9 @@
 
   (ShieldAgent judges <unique>, see the notebook cell; it says safe or unsafe)
 
-  python scripts/40_histories_pipeline.py select   --runs <unique> --judge <judge> --validity <histories>/validity.json
-      A run is valid when it is in <unique> (not a duplicate), the validity judge says it completed the
-      task, and ShieldAgent gave a verdict. Valid runs are copied into <out>/safe and <out>/unsafe (same
+  python scripts/40_histories_pipeline.py select   --runs <unique> --judge <judge> [--validity <histories>/validity.json]
+      A run is valid when it is in <unique> (not a duplicate) and ShieldAgent gave a verdict. With
+      --validity, runs the validity judge says did not complete the task are also left out. Valid runs are copied into <out>/safe and <out>/unsafe (same
       layout as unique: run_K/generated_trajectories.json). A task is "ready" with at least --min-safe
       safe and --min-unsafe unsafe valid runs (pilot defaults 2 and 2; the full plan uses 10 and 10 within
       30 draws). Prints a table and the commands to read one safe and one unsafe run per task. Writes
@@ -217,7 +217,7 @@ def cmd_select(a):
     runs_dir = Path(a.runs)
     out_dir = Path(a.out) if a.out else runs_dir / "selection"
     out_dir.mkdir(parents=True, exist_ok=True)
-    validity = {(r["task"], r["repeat"]): r for r in (load(a.validity) or [])}
+    validity = {(r["task"], r["repeat"]): r for r in (load(a.validity) or [])} if a.validity else {}
     rows, kept = [], {"safe": {}, "unsafe": {}}
     for k in run_numbers(runs_dir):
         traj = {t["id"]: t for t in (load(runs_dir / f"run_{k}" / "generated_trajectories.json") or [])}
@@ -227,13 +227,14 @@ def cmd_select(a):
             v, expl = verdicts.get(tid, ("none", ""))
             if v == "none":
                 why.append("no ShieldAgent verdict")
-            vr = validity.get((tid, k))
-            if vr is None:
-                why.append("not judged by the validity judge")
-            elif vr["completed"] is None:
-                why.append("validity judge gave no answer")
-            elif not vr["completed"]:
-                why.append("did not complete the task: " + vr["reason"][:60])
+            if a.validity:
+                vr = validity.get((tid, k))
+                if vr is None:
+                    why.append("not judged by the validity judge")
+                elif vr["completed"] is None:
+                    why.append("validity judge gave no answer")
+                elif not vr["completed"]:
+                    why.append("did not complete the task: " + vr["reason"][:60])
             rows.append(dict(task=tid, repeat=k, verdict=v, usable=not why, problem="; ".join(why), judge_line=expl))
             if not why:
                 kept[v].setdefault(k, []).append(t)
@@ -286,7 +287,7 @@ def main():
     s = sub.add_parser("select", help="combine everything and list the usable trajectories")
     s.add_argument("--runs", required=True, help="the unique folder")
     s.add_argument("--judge", required=True, help="the ShieldAgent results folder (run_1 ... run_N)")
-    s.add_argument("--validity", required=True, help="validity.json from the validity step")
+    s.add_argument("--validity", help="validity.json from the validity step; when given, runs that did not complete are left out")
     s.add_argument("--min-safe", type=int, default=2)
     s.add_argument("--min-unsafe", type=int, default=2)
     s.add_argument("--out", help="default: <runs>/selection")
