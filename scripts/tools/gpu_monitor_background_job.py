@@ -9,11 +9,11 @@ Reads nvidia-smi only; never touches your runs. Works from a notebook cell or a 
            GPU-hours; plus the same numbers for each marked stage
 
 Usage:
-  python scripts/gpu_monitor_background_job.py start   --out results/pilot/gpu_log.csv [--interval 30]
-  python scripts/gpu_monitor_background_job.py mark    --out results/pilot/gpu_log.csv generate
-  python scripts/gpu_monitor_background_job.py mark    --out results/pilot/gpu_log.csv judge
-  python scripts/gpu_monitor_background_job.py stop    --out results/pilot/gpu_log.csv
-  python scripts/gpu_monitor_background_job.py summary --out results/pilot/gpu_log.csv
+  python scripts/tools/gpu_monitor_background_job.py start   --out results/pilot/gpu_log.csv [--interval 30]
+  python scripts/tools/gpu_monitor_background_job.py mark    --out results/pilot/gpu_log.csv generate
+  python scripts/tools/gpu_monitor_background_job.py mark    --out results/pilot/gpu_log.csv judge
+  python scripts/tools/gpu_monitor_background_job.py stop    --out results/pilot/gpu_log.csv
+  python scripts/tools/gpu_monitor_background_job.py summary --out results/pilot/gpu_log.csv
 
 GPU-hours here is wall-clock time x number of GPUs seen (Kaggle's weekly quota counts wall-clock
 GPU time, not how busy the GPU was). "avg util" shows how busy the GPUs actually were.

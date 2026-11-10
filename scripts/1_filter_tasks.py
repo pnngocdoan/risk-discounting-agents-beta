@@ -3,7 +3,7 @@
 Reads the original and never modifies it. Writes one new file next to it:
   released_data_filtered.json  the 625 kept tasks, original order and fields unchanged
 
-Usage: python -I apply_metadata_decisions.py <path/to/data_dir>
+Usage: python -I 1_filter_tasks.py <path/to/data_dir>
 """
 import json
 import sys

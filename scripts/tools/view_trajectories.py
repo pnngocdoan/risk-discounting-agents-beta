@@ -5,10 +5,10 @@ Default: a colored, self-contained HTML page (open it in a browser, or show it i
 Reads the file only; never modifies it.
 
 Usage:
-  python scripts/view_trajectories.py results/pilot/batch_5_1/qwen2.5-3b/generated_trajectories.json
-  python scripts/view_trajectories.py generated_trajectories.json -o view.html
-  python scripts/view_trajectories.py generated_trajectories.json --terminal --max-chars 800
-  python scripts/view_trajectories.py generated_trajectories.json --ids 12 877
+  python scripts/tools/view_trajectories.py results/pilot/batch_5_1/qwen2.5-3b/generated_trajectories.json
+  python scripts/tools/view_trajectories.py generated_trajectories.json -o view.html
+  python scripts/tools/view_trajectories.py generated_trajectories.json --terminal --max-chars 800
+  python scripts/tools/view_trajectories.py generated_trajectories.json --ids 12 877
 """
 import argparse
 import html

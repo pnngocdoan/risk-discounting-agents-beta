@@ -1,7 +1,7 @@
 """Run BASE and every condition file against one set of model servers, so the model is loaded once.
 
 Starts one vLLM server per GPU, runs all jobs (every task of BASE, T1, T2, T3) together, then stops
-the servers. Each job is run by the same function as in 30_run_evals_with_autoscaler.py, so the
+the servers. Each job is run by the same function as in 3_run_tasks.py, so the
 results are the same files in the same places:
 
   <out>/base/run_1/generated_trajectories.json
@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-spec = importlib.util.spec_from_file_location("autoscaler", HERE / "30_run_evals_with_autoscaler.py")
+spec = importlib.util.spec_from_file_location("autoscaler", HERE / "3_run_tasks.py")
 ac = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ac)
 
