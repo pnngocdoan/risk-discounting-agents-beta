@@ -3,7 +3,7 @@
   export ANTHROPIC_API_KEY=...
   python scripts/4_filter_trajectories.py --runs <histories> --judge <judge> --audit <audit.xlsx>
 
-Run it after ShieldAgent has judged <histories> (the notebook cell with eval_with_shield.py, on the histories folder).
+Run it after ShieldAgent has judged <histories>:  python scripts/8_judge_conditions.py --histories <histories>  (writes <histories>/../judge_histories, which is --judge here).
 Writes the tab "filtered" of the audit sheet, one row per trajectory:
 
   duplicate_of            empty for a distinct trajectory; otherwise the repeat it is the same as. Two repeats of a task
