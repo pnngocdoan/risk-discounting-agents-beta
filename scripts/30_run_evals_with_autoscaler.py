@@ -211,7 +211,7 @@ def merge(out, tasks, repeats):
                 missing.append(t["id"])
         (out / f"run_{k}").mkdir(parents=True, exist_ok=True)
         (out / f"run_{k}" / "generated_trajectories.json").write_text(json.dumps(merged, indent=1, ensure_ascii=False))
-        print(f"run_{k}: {len(merged)} task(s) merged" + (f", MISSING {missing}" if missing else ""))
+        print(f"repeat {k} of {repeats}: {len(merged)} of {len(tasks)} tasks saved together in {out}/run_{k}/generated_trajectories.json" + (f"  (MISSING tasks {missing}: their job failed)" if missing else ""))
 
 
 def main():
@@ -262,7 +262,7 @@ def main():
             conc = [reported_concurrency(log) for _, _, log in procs]
             known = [c for c in conc if c]
             per_gpu = a.start_per_gpu or (max(2, math.ceil(min(known))) if known else 4)
-            print(f"each server reports room for {known or 'an unknown number of'} full-length conversations; first batch: {per_gpu} jobs per GPU")
+            print(f"each GPU's server says it has room for {known or 'an unknown number of'} full-length conversations at once, so the first batch is {per_gpu} jobs per GPU")
             report["vllm_reported_concurrency"] = conc
 
         n_srv = len(servers)
@@ -273,7 +273,7 @@ def main():
         sampler = GpuSampler(metrics)
         sampler.start()
         pending = list(jobs)
-        print(f"{len(tasks)} tasks x {a.repeats} repeats = {len(jobs)} jobs; first batch {min(level, len(pending))} jobs" + ("" if can_scale else " (fixed size)"))
+        print(f"{len(tasks)} tasks x {a.repeats} repeats = {len(jobs)} jobs (one job = one task in one repeat). First batch: {min(level, len(pending))} jobs at the same time" + ("" if can_scale else " (fixed size)") + ". Each line below is one finished job.")
         t0 = time.time()
         failed, rows, log_rows, good, frozen, batch_no, done = 0, [], [], level, False, 0, 0
         while pending:
@@ -289,25 +289,27 @@ def main():
                     rows.append((k, tid, round(secs, 1), status))
                     nfail += status not in ("ok", "skipped")
                     done += 1
-                    print(f"[{done}/{len(jobs)}] run {k} task {tid}: {status} ({secs:.0f} s)")
+                    print(f"[{done}/{len(jobs)} jobs finished] task {tid}, repeat {k} of {a.repeats}: {status} ({secs:.0f} s)")
             failed += nfail
             bs = sampler.batch_summary()
             secs_b = time.time() - tb
             # decide the next batch size from what this batch did
             if not can_scale or frozen or not pending:
-                decision, nxt = "fixed" if not can_scale else ("kept" if pending else "last batch"), level
+                decision, nxt = "fixed" if not can_scale else ("same size" if pending else "none, no jobs left"), level
             elif nfail:
-                decision, nxt, frozen = f"{nfail} job(s) failed: back to {good}, stop growing", good, True
+                decision, nxt, frozen = f"{nfail} job(s) failed, so go back to {good} jobs and stop growing", good, True
             elif bs["peak_waiting"] > 0 or bs["peak_cache_usage"] > a.cache_limit:
-                decision, nxt, frozen = "at capacity (requests waited or conversation space nearly full): hold", level, True
+                decision, nxt, frozen = "the GPUs are at their limit (requests waited or the conversation space is nearly full), so keep the same size", level, True
             else:
                 good = level
                 nxt = min(cap, math.ceil(level * 1.5))
-                decision = f"room left: grow to {nxt}" if nxt > level else "at the maximum"
+                decision = f"there is room left, so grow to {nxt} jobs" if nxt > level else "already at the maximum size"
             log_rows.append(dict(batch=batch_no, jobs=len(batch), seconds=round(secs_b), jobs_per_min=round(len(batch) / secs_b * 60, 2),
                                  failed=nfail, next_size=nxt, decision=decision, **bs))
-            print(f"batch {batch_no}: {len(batch)} jobs in {secs_b:.0f} s, util {bs['avg_util_pct']}%, space used {bs['peak_cache_usage']}, "
-                  f"waiting {bs['peak_waiting']}, failed {nfail} -> {decision}")
+            space = f"{bs['peak_cache_usage'] * 100:.0f}%"
+            print(f"batch {batch_no} done: {len(batch)} jobs started together took {secs_b:.0f} s. GPUs were busy {bs['avg_util_pct']}% of the time, "
+                  f"the model's conversation space was at most {space} full, {bs['peak_waiting']:.0f} request(s) had to wait, {nfail} job(s) failed.")
+            print(f"  next batch: {decision}")
             level = nxt
         wall = time.time() - t0
         gpu_stats = sampler.finish()
@@ -337,9 +339,9 @@ def main():
             w.writerows(log_rows)
 
     merge(out, tasks, a.repeats)
-    print(f"done in {wall / 60:.1f} min wall-clock, {report['gpu_hours']} GPU-hours; {failed} failed job(s)")
+    print(f"done: {len(jobs) - failed} of {len(jobs)} jobs succeeded in {wall / 60:.1f} min ({report['gpu_hours']} GPU-hours = minutes x GPUs); {failed} failed")
     for g, s in gpu_stats.items():
-        print(f"  GPU {g}: peak memory {s['peak_mem_mib']} MiB, average utilization {s['avg_util_pct']}%")
+        print(f"  GPU {g}: highest memory used {s['peak_mem_mib']} MiB, busy {s['avg_util_pct']}% of the time on average")
     sys.exit(1 if failed else 0)
 
 
