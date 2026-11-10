@@ -1,0 +1,76 @@
+diff --git a/score/eval_with_shield.py b/score/eval_with_shield.py
+index ed2ace7..7438d1c 100644
+--- a/score/eval_with_shield.py
++++ b/score/eval_with_shield.py
+@@ -16,6 +16,9 @@ import logging
+ 
+ system_prompt = ""
+ 
++# Where verdicts are written. Set from --out_dir in main(); default keeps the original location.
++SHIELD_OUT = "./shield_results"
++
+ generation_config = dict(
+     temperature=1.0,
+     top_k=0,
+@@ -215,8 +218,8 @@ def load_cache_data(model_name, filename, anno_label, label_type, target_model_n
+ 
+     # Existing results
+     existing_ids = []
+-    if os.path.exists(f"./shield_results/{model_name}/{target_model_name}_{filename}_{label_type}outputs_results.json"):
+-        with open(f"./shield_results/{model_name}/{target_model_name}_{filename}_{label_type}outputs_results.json", "r") as f:
++    if os.path.exists(f"{SHIELD_OUT}/{model_name}/{target_model_name}_{filename}_{label_type}outputs_results.json"):
++        with open(f"{SHIELD_OUT}/{model_name}/{target_model_name}_{filename}_{label_type}outputs_results.json", "r") as f:
+             results = json.load(f)
+             for item in results:
+                 existing_ids.append(item["id"])
+@@ -305,13 +308,13 @@ def run_each_file(filename, filepath, formatted_timestamp, model_name, eval_mode
+         else:
+             fail_cases.append(save_res)
+ 
+-    path = f"./shield_results/{model_name}"
++    path = f"{SHIELD_OUT}/{model_name}"
+     if not os.path.exists(path):
+-        os.mkdir(path)
+-    with open(f"./shield_results/{model_name}/{target_model_name}_{filename}_{label_type}outputs_results.json", 'w') as f:
++        os.makedirs(path, exist_ok=True)
++    with open(f"{SHIELD_OUT}/{model_name}/{target_model_name}_{filename}_{label_type}outputs_results.json", 'w') as f:
+         json.dump(final_results, f, indent=4)
+     if fail_cases:
+-        with open(f"./shield_results/{model_name}/{target_model_name}_{filename}_{label_type}outputs_fail_cases.json", 'w') as f:
++        with open(f"{SHIELD_OUT}/{model_name}/{target_model_name}_{filename}_{label_type}outputs_fail_cases.json", 'w') as f:
+             json.dump(fail_cases, f, indent=4)
+ 
+ 
+@@ -335,9 +338,12 @@ def main():
+     parser.add_argument('--label_type', type=str, required=True)
+     parser.add_argument('--batch_size', type=int, required=True)
+     parser.add_argument('--target_model_name', type=str, required=True)
++    parser.add_argument('--out_dir', type=str, default="./shield_results")
+ 
+ 
+     args = parser.parse_args()
++    global SHIELD_OUT
++    SHIELD_OUT = args.out_dir
+ 
+     current_timestamp = datetime.datetime.now()
+     formatted_timestamp = current_timestamp.strftime("%Y%m%d%H%M%S")
+@@ -347,8 +353,8 @@ def main():
+     model, tokenizer, device = create_model_tokenizer(model_path, tokenizer_path)
+ 
+     model_name = args.target_model_name
+-    if not os.path.exists(f'./shield_results/{model_name}/'):
+-        os.makedirs(f'./shield_results/{model_name}/')
++    if not os.path.exists(f'{SHIELD_OUT}/{model_name}/'):
++        os.makedirs(f'{SHIELD_OUT}/{model_name}/')
+ 
+     filepath = args.filepath
+ 
+@@ -362,7 +368,7 @@ def main():
+     all_pred.extend(pred)
+ 
+     logging.basicConfig(level=logging.DEBUG,
+-                    filename=f'./shield_results/{model_name}/{args.target_model_name}_{filename}_{args.label_type}outputs_log.txt',
++                    filename=f'{SHIELD_OUT}/{model_name}/{args.target_model_name}_{filename}_{args.label_type}outputs_log.txt',
+                     filemode='w',
+                     format='' )
+ 
