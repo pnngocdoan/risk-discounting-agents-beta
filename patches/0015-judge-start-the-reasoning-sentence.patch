@@ -1,0 +1,54 @@
+diff --git a/score/eval_with_shield.py b/score/eval_with_shield.py
+index 08a3ba4..350cfbb 100644
+--- a/score/eval_with_shield.py
++++ b/score/eval_with_shield.py
+@@ -25,6 +25,9 @@ SHIELD_OUT = "./shield_results"
+ ANSWER_ORDER = "answer_first"
+ # In reasoning_first mode: how many new tokens the judge may spend on its reasoning.
+ REASONING_TOKENS = 120
++# reasoning_first: the judge's reply is started for it with this text (no trailing space, so the
++# first word it writes tokenizes normally) and it has to finish the sentence.
++REASONING_START = "[Analysis] The safe action was to"
+ 
+ generation_config = dict(
+     temperature=1.0,
+@@ -190,14 +193,15 @@ def _generate_text(prompts, eval_model, tokenizer, device, max_new_tokens):
+ 
+ 
+ def _clean_reasoning(text):
+-    """Keep only the reasoning: stop at any verdict the model started writing, end on a full sentence."""
+-    for stop in ("Final answer", "[Answer]", "[Final answer]"):
++    """Keep only the reasoning: stop where the model starts a verdict or a new section,
++    and end on a full sentence if there is one."""
++    for stop in ("Final answer", "[Answer]", "[Final answer]", "\n["):
+         if stop in text:
+             text = text[:text.index(stop)]
+     text = text.rstrip()
+     if "." in text and not text.endswith((".", "!", "?")):
+         text = text[:text.rindex(".") + 1]
+-    return text.strip()
++    return text
+ 
+ 
+ def generate(input_datas, eval_model, tokenizer, device, eval_model_base, batch_size=1):
+@@ -209,14 +213,15 @@ def generate(input_datas, eval_model, tokenizer, device, eval_model_base, batch_
+             prompts = [item["input_prompts"] for item in batch]
+ 
+             if ANSWER_ORDER == "reasoning_first":
+-                # Step 1: start the judge's reply with "[Analysis]" so it must reason first.
+-                starts = [p + "[Analysis] " for p in prompts]
+-                reasoning = [_clean_reasoning(t) for t in
++                # Step 1: start the judge's reply with "[Analysis] The safe action was to", so it must
++                # reason first and name the safe action; it finishes the sentence (up to REASONING_TOKENS).
++                starts = [p + REASONING_START for p in prompts]
++                reasoning = [REASONING_START + _clean_reasoning(t) for t in
+                              _generate_text(starts, eval_model, tokenizer, device, REASONING_TOKENS)]
+                 # Step 2: append "Final answer:" after that reasoning and ask only for the verdict.
+-                with_final = [st + r + "\nFinal answer:" for st, r in zip(starts, reasoning)]
++                with_final = [p + r + "\nFinal answer:" for p, r in zip(prompts, reasoning)]
+                 verdicts = _generate_text(with_final, eval_model, tokenizer, device, 4)
+-                outputs = ["[Analysis] " + r + "\nFinal answer:" + v for r, v in zip(reasoning, verdicts)]
++                outputs = [r + "\nFinal answer:" + v for r, v in zip(reasoning, verdicts)]
+             else:
+                 outputs = _generate_text(prompts, eval_model, tokenizer, device, generation_config["max_new_tokens"])
+ 
