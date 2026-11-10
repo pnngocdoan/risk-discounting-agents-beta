@@ -1,6 +1,6 @@
 """Run every task of a batch, several times each, in parallel on all the GPUs on the machine.
 
-Used to collect the 6 history runs per task (script 3), and by 7_run_conditions.py, which reuses its server and job code.
+Used to collect the 6 history runs per task (with --audit it also writes the tab 'runs'), and by 7_run_conditions.py, which reuses its server and job code.
 
 One command does everything: it finds the GPUs, starts one vLLM model server on each, works out
 how many jobs each server can take at once, runs every (task, repeat) job, merges the results,
@@ -273,6 +273,7 @@ def main():
     ap.add_argument("--job-timeout", type=int, default=1800, help="seconds before one job is stopped and counted as failed")
     ap.add_argument("--greedy", type=int, default=0, help="0 = random sampling (default), 1 = greedy")
     ap.add_argument("--keep-servers", action="store_true", help="leave the model servers running at the end")
+    ap.add_argument("--audit", help="also write the trajectories into the tab 'runs' of this audit.xlsx (the first step of building histories)")
     a = ap.parse_args()
 
     tasks = json.loads(Path(a.batch).read_text())
@@ -401,6 +402,17 @@ def main():
             w.writerows(log_rows)
 
     merge(out, tasks, a.repeats)
+    if a.audit:
+        sys.path.insert(0, str(Path(__file__).resolve().parent / "tools"))
+        import audit_sheet
+        rows = []
+        for k in range(1, a.repeats + 1):
+            f = out / f"run_{k}" / "generated_trajectories.json"
+            for item in json.loads(f.read_text()) if f.exists() else []:
+                rows.append(dict(task=str(item["id"]), run=str(k), instruction=item.get("instruction", ""), history_text=audit_sheet.history_text_of(item)))
+        rows.sort(key=lambda r: audit_sheet.sort_key(r["task"], r["run"]))
+        audit_sheet.write_tab(a.audit, "runs", rows)
+        print(f"wrote {len(rows)} trajectories to the tab 'runs' of {a.audit}")
     print(f"done: {len(jobs) - failed} of {len(jobs)} jobs succeeded in {wall / 60:.1f} min ({report['gpu_hours']} GPU-hours = minutes x GPUs); {failed} failed")
     for g, s in gpu_stats.items():
         print(f"  GPU {g}: highest memory used {s['peak_mem_mib']} MiB, busy {s['avg_util_pct']}% of the time on average")
