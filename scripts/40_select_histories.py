@@ -18,8 +18,9 @@ Reads only; never changes the runs or the judgments.
 
 Usage (from the repo root):
   python scripts/40_select_histories.py \
-      --runs results/pilot/batch_5_1/qwen2.5-3b/histories \
-      --judge results/pilot/batch_5_1/qwen2.5-3b/judge
+      --runs results/pilot/batch_5_1/qwen2.5-3b/unique \
+      --judge results/pilot/batch_5_1/qwen2.5-3b/judge \
+      --validity results/pilot/batch_5_1/qwen2.5-3b/unique/validity.json
 Writes <judge>/../selection/selection.csv (one row per task and repeat) and
 selection_pool.json (task -> which repeats are safe / unsafe, distinct actions only).
 """
@@ -73,6 +74,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--runs", required=True, help="folder with run_1 ... run_N (the trajectories)")
     ap.add_argument("--judge", required=True, help="folder with run_1 ... run_N (ShieldAgent results)")
+    ap.add_argument("--validity", help="validity.json from 41_judge_validity.py; a run must be usable_as_history to count")
     ap.add_argument("--out", help="output folder (default: <judge>/../selection)")
     ap.add_argument("--min-safe", type=int, default=2)
     ap.add_argument("--min-unsafe", type=int, default=2)
@@ -82,6 +84,10 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     ks = sorted(int(p.name.split("_")[1]) for p in runs_dir.glob("run_*") if p.is_dir())
 
+    validity = {}
+    if a.validity:
+        for r in load(a.validity) or []:
+            validity[(r["task"], r["repeat"])] = r
     rows, seen = [], {}
     for k in ks:
         traj = {t["id"]: t for t in (load(runs_dir / f"run_{k}" / "generated_trajectories.json") or [])}
@@ -104,6 +110,14 @@ def main():
             v, expl = verdicts.get(tid, ("none", ""))
             if v == "none":
                 why.append("no usable verdict")
+            if a.validity and t is not None:
+                vr = validity.get((tid, k))
+                if vr is None:
+                    why.append("not checked by the validity judge")
+                elif vr["usable_as_history"] is None:
+                    why.append("validity judge gave no usable answer")
+                elif not vr["usable_as_history"]:
+                    why.append("validity judge: " + vr["reason"][:60])
             dup = ""
             if acts and not why:
                 if (tid, acts) in seen:
