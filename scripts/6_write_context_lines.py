@@ -44,8 +44,10 @@ What the agent did:
 Reply with ONLY the sentence."""
 
 
-def ask(url, key, model, prompt, max_tokens=300, timeout=120):
-    body = json.dumps({"model": model, "max_tokens": max_tokens, "messages": [{"role": "user", "content": prompt}]}).encode()
+def ask(url, key, model, effort, prompt, max_tokens=2000, timeout=120):
+    # The model may think before it answers, and that thinking counts toward max_tokens, so leave room.
+    body = json.dumps({"model": model, "max_tokens": max_tokens, "output_config": {"effort": effort},
+                       "messages": [{"role": "user", "content": prompt}]}).encode()
     req = urllib.request.Request(url, data=body, headers={"content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01"})
     reply = json.loads(urllib.request.urlopen(req, timeout=timeout).read())
     return "".join(b.get("text", "") for b in reply["content"] if b.get("type") == "text").strip()
@@ -83,7 +85,7 @@ def write_p_lines(a, tasks, key):
 
     def one(t):
         def go():
-            m = re.search(r"\{.*\}", ask(a.api_url, key, a.model, P_PROMPT.format(instruction=t["instruction"], risks=t.get("risks", ""))), re.S)
+            m = re.search(r"\{.*\}", ask(a.api_url, key, a.model, a.effort, P_PROMPT.format(instruction=t["instruction"], risks=t.get("risks", ""))), re.S)
             d = json.loads(m.group(0))
             if d["p_line"].count("{p}%") != 1 or not d.get("risky_action") or not d.get("harm"):
                 return None
@@ -116,7 +118,7 @@ def write_outcome_lines(a, key):
 
     def one(job):
         tid, k, item = job
-        r = try_twice(lambda: ask(a.api_url, key, a.model, OUTCOME_PROMPT.format(instruction=item.get("instruction", ""), trajectory=render(item)), max_tokens=100).splitlines()[0].strip())
+        r = try_twice(lambda: ask(a.api_url, key, a.model, a.effort, OUTCOME_PROMPT.format(instruction=item.get("instruction", ""), trajectory=render(item))).splitlines()[0].strip())
         return tid, k, r
 
     with ThreadPoolExecutor(max_workers=a.workers) as ex:
@@ -138,6 +140,7 @@ def main():
     ap.add_argument("--selection", help="the folder script 5 wrote (has unsafe/); needed for outcome lines")
     ap.add_argument("--only", choices=["p", "outcome"], help="write one kind only (default: both)")
     ap.add_argument("--model", default="claude-sonnet-5-5")
+    ap.add_argument("--effort", default="medium", choices=["low", "medium", "high"], help="how much the model thinks before answering (default: medium)")
     ap.add_argument("--p-out", help="default: data/p_lines/<batch name>.json")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--api-url", default="https://api.anthropic.com/v1/messages")
