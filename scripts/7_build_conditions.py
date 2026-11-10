@@ -3,14 +3,14 @@
 Each condition becomes one batch file in the same format as data/batches/batch_5_1.json, with the
 context block added to the instruction (after it, in the user turn). The autoscaler runs it unchanged:
 
-  python scripts/6_build_conditions.py --batch data/batches/batch_5_1.json \
+  python scripts/7_build_conditions.py --batch data/batches/batch_5_1.json \
       --p-lines data/p_lines/batch_5_1.json --selection <unique>/selection
 
 Histories are unsafe-only (f = 1) and use the task's own unsafe runs from <selection>/unsafe, shuffled
 once per task with a fixed seed. The k = 2 history is the first two items of the k = 5 history.
 Rendering: "Previous experience i:", then Action / Observation lines, then "Outcome:". A task with
-fewer than k unsafe runs gets no condition for that k (it is printed). The outcome line is one fixed
-harmless sentence for now; plan 3.4 still has to decide how outcome lines are made.
+fewer than k unsafe runs gets no condition for that k (it is printed). Each history ends with the outcome line
+script 6 wrote for it (<selection>/outcome_lines.json); without that file every history gets one fixed harmless sentence.
 
 Writes data/conditions/<batch name>/<condition>.json and histories.json (the rendered histories).
 Prints the rendered prompt of one task per condition type. Only reads the runs.
@@ -44,20 +44,21 @@ def render_trajectory(item):
 
 
 def unsafe_pool(selection, seed):
-    """{task id: [unsafe trajectories from every run]} in run order."""
+    """{task id: [(run number, unsafe trajectory) from every run]}, shuffled once per task."""
     pool = {}
     folder = Path(selection) / "unsafe"
     for run in sorted(folder.glob("run_*"), key=lambda p: int(p.name.split("_")[1])):
         for item in json.loads((run / "generated_trajectories.json").read_text()):
-            pool.setdefault(item["id"], []).append(item)
+            pool.setdefault(item["id"], []).append((run.name.split("_")[1], item))
     for tid, items in pool.items():
         random.Random(f"{seed}-{tid}").shuffle(items)
     return pool
 
 
-def history_text(items, k, outcome):
-    return "\n\n".join(f"Previous experience {i + 1}:\n{render_trajectory(it)}\nOutcome: {outcome}"
-                       for i, it in enumerate(items[:k]))
+def history_text(items, k, outcome, outcome_lines):
+    """The first k histories. Each ends with its own outcome line if outcome_lines has one, else the fixed outcome."""
+    return "\n\n".join(f"Previous experience {i + 1}:\n{render_trajectory(it)}\nOutcome: {outcome_lines.get(str(it['id']), {}).get(run, outcome)}"
+                       for i, (run, it) in enumerate(items[:k]))
 
 
 def context_block(p_line=None, p=None, history=None):
@@ -77,12 +78,16 @@ def main():
     ap.add_argument("--out", help="default: data/conditions/<batch name>")
     ap.add_argument("--p-levels", type=int, nargs="+", default=P_LEVELS, help="harm probabilities in percent (default: %(default)s)")
     ap.add_argument("--k-values", type=int, nargs="+", default=K_VALUES, help="history lengths (default: %(default)s)")
-    ap.add_argument("--outcome", default=OUTCOME, help="the outcome line after each history")
+    ap.add_argument("--outcome-lines", help="outcome_lines.json from script 6 (default: <selection>/outcome_lines.json if it exists)")
+    ap.add_argument("--outcome", default=OUTCOME, help="the outcome line used when a trajectory has no line of its own")
     ap.add_argument("--seed", type=int, default=SEED, help="seed for the history order")
     a = ap.parse_args()
     tasks = json.loads(Path(a.batch).read_text())
     p_lines = json.loads(Path(a.p_lines).read_text())
     pool = unsafe_pool(a.selection, a.seed)
+    ol = Path(a.outcome_lines) if a.outcome_lines else Path(a.selection) / "outcome_lines.json"
+    outcome_lines = json.loads(ol.read_text()) if ol.exists() else {}
+    print(f"outcome lines: {sum(len(v) for v in outcome_lines.values())} from {ol}" if outcome_lines else f"no outcome lines file, using the fixed outcome for every history")
     missing = [str(t["id"]) for t in tasks if str(t["id"]) not in p_lines]
     if missing:
         raise SystemExit(f"--p-lines has no entry for tasks {missing}")
@@ -94,7 +99,7 @@ def main():
         for k in a.k_values:
             have = len(pool.get(t["id"], []))
             if have >= k:
-                histories.setdefault(str(t["id"]), {})[str(k)] = history_text(pool[t["id"]], k, a.outcome)
+                histories.setdefault(str(t["id"]), {})[str(k)] = history_text(pool[t["id"]], k, a.outcome, outcome_lines)
             else:
                 print(f"task {t['id']}: {have} unsafe runs, so no history of length {k}")
 

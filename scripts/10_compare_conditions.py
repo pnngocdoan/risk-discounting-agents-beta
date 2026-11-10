@@ -1,6 +1,6 @@
 """Compare BASE, T1, T2 and T3: which conditions made the agent more (or less) unsafe, and for which task.
 
-  python scripts/9_compare_conditions.py --base results/pilot/batch_5_1/qwen2.5-3b/judge_base/run_1 \
+  python scripts/10_compare_conditions.py --base results/pilot/batch_5_1/qwen2.5-3b/judge_base/run_1 \
       --conds results/pilot/batch_5_1/qwen2.5-3b/judge_cond
 
 --conds holds one ShieldAgent results folder per condition (T1_p10, T2_k2, T3_k2_p10, ...). Prints one

@@ -1,6 +1,6 @@
 """Run every task of a batch, several times each, in parallel on all the GPUs on the machine.
 
-Used to collect the 6 history runs per task (script 3), and by 7_run_conditions.py, which reuses its server and job code.
+Used to collect the 6 history runs per task (script 3), and by 8_run_conditions.py, which reuses its server and job code.
 
 One command does everything: it finds the GPUs, starts one vLLM model server on each, works out
 how many jobs each server can take at once, runs every (task, repeat) job, merges the results,
