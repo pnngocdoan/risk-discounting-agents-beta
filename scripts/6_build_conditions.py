@@ -3,7 +3,7 @@
 Each condition becomes one batch file in the same format as data/batches/batch_5_1.json, with the
 context block added to the instruction (after it, in the user turn). The autoscaler runs it unchanged:
 
-  python scripts/50_build_conditions.py --batch data/batches/batch_5_1.json \
+  python scripts/6_build_conditions.py --batch data/batches/batch_5_1.json \
       --p-lines data/p_lines/batch_5_1.json --selection <unique>/selection
 
 Histories are unsafe-only (f = 1) and use the task's own unsafe runs from <selection>/unsafe, shuffled

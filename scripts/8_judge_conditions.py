@@ -1,7 +1,7 @@
 """Judge BASE and every condition with ShieldAgent, loading ShieldAgent once.
 
-Reads  <out>/base/run_1 and <out>/cond/<name>/run_1  (written by 80_run_conditions_once.py)
-Writes <out>/judge_base/run_1 and <out>/judge_cond/<name>  (the folders 70_compare_conditions.py reads)
+Reads  <out>/base/run_1 and <out>/cond/<name>/run_1  (written by 7_run_conditions.py)
+Writes <out>/judge_base/run_1 and <out>/judge_cond/<name>  (the folders 9_compare_conditions.py reads)
 
 Uses the same judge code and settings as the one-file command (explanation of 60 tokens after the verdict).
 A folder that already has results is skipped. Run it after the model servers have stopped.

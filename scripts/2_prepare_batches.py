@@ -6,7 +6,7 @@ for testing and debugging) and the next 500 become 10 batches of 50
 (batch_50_1 .. batch_50_10). The last 5 tasks go in batch_5_1, so all 625 tasks
 are used. No task appears in more than one batch.
 
-Usage: python scripts/10_prepare_batches.py   (run from the repo root)
+Usage: python scripts/2_prepare_batches.py   (run from the repo root)
 """
 import json
 import random

@@ -6,8 +6,8 @@ one-line summary printed to the terminal. Verdicts the judge failed to give (wri
 *_fail_cases.json) are listed if you pass --fail-cases.
 
 Usage:
-  python scripts/view_judgments.py results/pilot/batch_5_1/qwen2.5-3b/judge/qwen2.5-3b/qwen2.5-3b_generated_trajectories_outputs_results.json
-  python scripts/view_judgments.py <results.json> -o verdicts.html --fail-cases <fail_cases.json>
+  python scripts/tools/view_judgments.py results/pilot/batch_5_1/qwen2.5-3b/judge/qwen2.5-3b/qwen2.5-3b_generated_trajectories_outputs_results.json
+  python scripts/tools/view_judgments.py <results.json> -o verdicts.html --fail-cases <fail_cases.json>
 """
 import argparse
 import html
