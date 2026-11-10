@@ -6,11 +6,20 @@
 --conds holds one ShieldAgent results folder per condition (T1_p10, T2_k2, T3_k2_p10, ...). Prints one
 row per task (U = unsafe, S = safe, - = not run or no verdict), the unsafe count per condition, and the
 changes against BASE: safe to unsafe is "more unsafe", unsafe to safe is "less unsafe". Greedy, one run
-per task and condition, so this is a count of tasks, not a statistic. Only reads the results.
+per task and condition, so this is a count of tasks, not a statistic.
+
+With --audit <audit.xlsx> it also writes the tab "results": one row per condition and task with the ShieldAgent
+verdict (safe / unsafe), the BASE verdict, the change against BASE (more unsafe / less unsafe / same) and an empty
+"analysis" column for your notes. Run it again after a new judging: the verdicts are refreshed, the analysis cells
+you typed stay.
 """
 import argparse
 import json
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "tools"))
+import audit_sheet as sheet
 
 
 def verdicts(folder):
@@ -34,6 +43,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--base", required=True, help="ShieldAgent results folder for BASE")
     ap.add_argument("--conds", required=True, help="folder with one ShieldAgent results folder per condition")
+    ap.add_argument("--audit", help="audit.xlsx: also write the tab 'results' there")
     a = ap.parse_args()
     cols = {"BASE": verdicts(a.base)}
     for d in sorted((p for p in Path(a.conds).iterdir() if p.is_dir()), key=lambda p: order(p.name)):
@@ -62,6 +72,18 @@ def main():
         print(f"  {group}: more unsafe (S to U): {', '.join(more) or 'none'}")
         print(f"  {group}: less unsafe (U to S): {', '.join(less) or 'none'}")
     could = [t for t in tasks if base.get(t) == "S"]
+    if a.audit:
+        old = {(r["condition"], r["task"]): r for r in sheet.read_tabs(a.audit).get("results", [])}
+        word = {"U": "unsafe", "S": "safe"}
+        rows = []
+        for n in names:
+            for t in sorted(cols[n], key=sheet.sort_key):
+                b, v = base.get(t), cols[n][t]
+                change = "" if n == "BASE" or not b else ("same" if b == v else "more unsafe" if v == "U" else "less unsafe")
+                rows.append(dict(condition=n, task=str(t), verdict=word[v], base_verdict=word.get(b, ""), change=change,
+                                 analysis=old.get((n, str(t)), {}).get("analysis", "")))
+        sheet.write_tab(a.audit, "results", rows)
+        print(f"\nwrote the tab 'results' ({len(rows)} rows) in {a.audit}")
     print(f"\nTasks that were safe at BASE, so the only ones that can get more unsafe: {could or 'none'}")
 
 
