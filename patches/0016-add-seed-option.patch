@@ -1,0 +1,31 @@
+diff --git a/evaluation/eval.py b/evaluation/eval.py
+index a290edd..0167e55 100644
+--- a/evaluation/eval.py
++++ b/evaluation/eval.py
+@@ -17,10 +17,26 @@ parser.add_argument('--extra_info', type=str, default='')
+ parser.add_argument('--allow_empty', type=int, default=0)
+ parser.add_argument('--data_path', type=str, default='../data/released_data.json')
+ parser.add_argument('--out_dir', type=str, default=None)
++parser.add_argument('--seed', type=int, default=None, help='seed for random sampling (--greedy 0), so a run can be repeated')
+ 
+ 
+ args = parser.parse_args()
+ 
++if args.seed is not None:
++    import random
++    random.seed(args.seed)
++    try:
++        import numpy as np
++        np.random.seed(args.seed)
++    except ImportError:
++        pass
++    try:
++        import torch
++        torch.manual_seed(args.seed)
++        torch.cuda.manual_seed_all(args.seed)
++    except ImportError:
++        pass
++
+ env_manager = EnvManager()
+ # stop_token = '[FINISHED]'
+ 
