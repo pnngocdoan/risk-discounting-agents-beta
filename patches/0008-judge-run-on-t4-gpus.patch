@@ -1,0 +1,27 @@
+diff --git a/score/eval_with_shield.py b/score/eval_with_shield.py
+index da0c9eb..ed2ace7 100644
+--- a/score/eval_with_shield.py
++++ b/score/eval_with_shield.py
+@@ -29,6 +29,7 @@ generation_config = dict(
+ 
+ def create_model_tokenizer(model_path, tokenizer_path):
+     load_type = torch.float16
++    # Inputs go to the first GPU; the model itself is spread over all GPUs (device_map='auto').
+     if torch.cuda.is_available():
+         device = torch.device(0)
+     else:
+@@ -41,11 +42,11 @@ def create_model_tokenizer(model_path, tokenizer_path):
+         load_in_8bit=False,
+         torch_dtype=load_type,
+         trust_remote_code=True,
+-        attn_implementation='flash_attention_2'
++        attn_implementation='sdpa',  # flash_attention_2 is not supported on T4 GPUs
++        device_map='auto'            # ShieldAgent (about 15 GB at FP16) does not fit one T4
+     )
+ 
+-    model = model.eval().to(device)
+-    model = torch.compile(model)
++    model = model.eval()
+ 
+     if tokenizer.eos_token is None:
+         tokenizer.eos_token = '<|endoftext|>'
