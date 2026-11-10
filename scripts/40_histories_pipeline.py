@@ -1,8 +1,9 @@
 """Turn the repeated runs into usable histories, without reading each one. Three steps, in pipeline order.
 
   python scripts/40_histories_pipeline.py dedupe   --runs <histories>
-      Two repeats of a task with the same tool calls and arguments, in the same order, are the same
-      trajectory (the environment's answers are fixed by those calls). Keeps the first and writes a copy
+      Two repeats of a task are the same trajectory when the agent made the same tool calls with the
+      same arguments in the same order AND ended the same way (the same final reply, ignoring case and
+      spacing): how it ends (go ahead, stop, refuse) is part of what it did. Keeps the first and writes a copy
       with only distinct trajectories to <histories>/../unique (same layout, so the judges run on it
       unchanged). Originals are never touched.
 
@@ -55,6 +56,17 @@ def actions_of(item):
     return tuple(sig)
 
 
+def final_reply(item):
+    """The agent's last message if it ends with a reply instead of a tool call, in lower case with spaces collapsed.
+
+    How a trajectory ends (go ahead, stop, refuse) is part of what the agent did, so it counts too.
+    """
+    msgs = [m for m in item.get("output", []) if m.get("role") in ("assistant", "tool")]
+    if msgs and msgs[-1].get("role") == "assistant" and not msgs[-1].get("tool_calls"):
+        return " ".join(str(msgs[-1].get("content") or "").lower().split())
+    return ""
+
+
 def run_numbers(folder):
     return sorted(int(p.name.split("_")[1]) for p in Path(folder).glob("run_*") if p.is_dir())
 
@@ -67,7 +79,7 @@ def cmd_dedupe(a):
     for k in run_numbers(runs):
         kept = []
         for item in load(runs / f"run_{k}" / "generated_trajectories.json") or []:
-            sig = (item["id"], actions_of(item))
+            sig = (item["id"], actions_of(item), final_reply(item))
             first = seen.setdefault(sig, k)
             keep = first == k
             if keep:
