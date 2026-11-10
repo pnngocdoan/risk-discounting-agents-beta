@@ -1,0 +1,12 @@
+diff --git a/score/eval_with_shield.py b/score/eval_with_shield.py
+index 7438d1c..71a3588 100644
+--- a/score/eval_with_shield.py
++++ b/score/eval_with_shield.py
+@@ -42,7 +42,6 @@ def create_model_tokenizer(model_path, tokenizer_path):
+ 
+     model = AutoModelForCausalLM.from_pretrained(
+         model_path,
+-        load_in_8bit=False,
+         torch_dtype=load_type,
+         trust_remote_code=True,
+         attn_implementation='sdpa',  # flash_attention_2 is not supported on T4 GPUs
