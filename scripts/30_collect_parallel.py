@@ -9,14 +9,17 @@ Change the model, tasks or repeats with the flags; nothing is fixed:
               for a hosted API that is already running (set RDA_BASE_URL and RDA_API_KEY)
   --batch     any batch file (the tasks come from it)
   --repeats   runs per task (default 6)
-How many jobs run at once is decided from the hardware: after the server loads, vLLM reports how
-many full-length conversations fit in the GPU's memory; the script runs about twice that per GPU
-(most conversations are shorter than the maximum). Override with --workers-per-gpu N.
+How many jobs run at once is decided from the hardware and then adjusted as it runs. The first
+batch is what vLLM says fits in each GPU (rounded up). After every batch the script reads what
+happened (failures, how full vLLM's conversation space got, whether requests had to wait, GPU
+utilization) and sets the next batch: bigger if there was room, the same if the GPU is at its
+limit, the last good size if jobs failed. One row per batch goes to autoscale_log.csv.
+Use --no-autoscale for a fixed size, --start-per-gpu / --max-per-gpu to set the range.
 
 Layout written under --out:
   run_<k>/generated_trajectories.json     all tasks of repeat k (merged at the end)
   run_<k>/parts/<task id>/                 each job's own output and log.txt
-  timings.csv, hardware_report.json        seconds per job; what the hardware did
+  timings.csv, autoscale_log.csv, hardware_report.json   seconds per job; one row per batch; totals
 Finished jobs are skipped on a restart.
 
 Usage (from the repo root, after scripts/apply_bug_fixes.sh and `pip install vllm`):
@@ -53,12 +56,24 @@ def gpu_count():
 
 
 class GpuSampler(threading.Thread):
-    """Samples nvidia-smi every few seconds: peak memory and average utilization per GPU."""
+    """Samples nvidia-smi (and the vLLM gauges, if given) every few seconds.
 
-    def __init__(self, every=5.0):
+    Keeps run totals (peak memory, average utilization per GPU) and, between calls to
+    new_batch() and batch_summary(), the same numbers for just that batch.
+    """
+
+    def __init__(self, metrics_urls=(), every=5.0):
         super().__init__(daemon=True)
-        self.every, self.stop_flag = every, threading.Event()
+        self.every, self.stop_flag, self.metrics_urls = every, threading.Event(), list(metrics_urls)
         self.peak, self.utils = {}, {}
+        self.new_batch()
+
+    def new_batch(self):
+        self.b_utils, self.b_wait, self.b_cache, self.b_mem = [], 0.0, 0.0, 0
+
+    def batch_summary(self):
+        return dict(avg_util_pct=round(sum(self.b_utils) / len(self.b_utils)) if self.b_utils else None,
+                    peak_waiting=self.b_wait, peak_cache_usage=round(self.b_cache, 3), peak_mem_mib=self.b_mem)
 
     def run(self):
         while not self.stop_flag.is_set():
@@ -69,14 +84,41 @@ class GpuSampler(threading.Thread):
                     i, u, m = [int(float(x)) for x in line.split(",")]
                     self.peak[i] = max(self.peak.get(i, 0), m)
                     self.utils.setdefault(i, []).append(u)
+                    self.b_utils.append(u)
+                    self.b_mem = max(self.b_mem, m)
             except Exception:
                 pass
+            for url in self.metrics_urls:
+                g = vllm_gauges(url)
+                if g:
+                    self.b_wait = max(self.b_wait, g["waiting"])
+                    self.b_cache = max(self.b_cache, g["cache_usage"])
             self.stop_flag.wait(self.every)
 
     def finish(self):
         self.stop_flag.set()
         self.join(timeout=10)
         return {i: dict(peak_mem_mib=self.peak[i], avg_util_pct=round(sum(self.utils[i]) / len(self.utils[i]))) for i in self.peak}
+
+
+def vllm_gauges(metrics_url):
+    """Read vLLM's own gauges: requests waiting for room, and how full the conversation space is (0 to 1).
+
+    nvidia-smi cannot show this: vLLM reserves most of the GPU memory when it starts, so the
+    memory always looks nearly full.
+    """
+    try:
+        text = urllib.request.urlopen(metrics_url, timeout=5).read().decode()
+    except Exception:
+        return None
+    def val(pattern):
+        m = re.search(r"^" + pattern + r"(?:\{[^}]*\})?\s+([0-9.eE+-]+)", text, re.M)
+        return float(m.group(1)) if m else None
+    waiting = val(r"vllm:num_requests_waiting")
+    cache = val(r"vllm:(?:gpu_cache_usage_perc|kv_cache_usage_perc)")
+    if waiting is None and cache is None:
+        return None
+    return dict(waiting=waiting or 0.0, cache_usage=cache or 0.0)
 
 
 # ---------- model servers ----------
@@ -169,7 +211,10 @@ def main():
     ap.add_argument("--batch", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--repeats", type=int, default=6)
-    ap.add_argument("--workers-per-gpu", type=int, default=None, help="override the automatic choice")
+    ap.add_argument("--start-per-gpu", type=int, default=None, help="jobs per GPU in the first batch (default: what vLLM says fits, rounded up)")
+    ap.add_argument("--max-per-gpu", type=int, default=32, help="the batch size never grows past this many jobs per GPU")
+    ap.add_argument("--no-autoscale", action="store_true", help="keep every batch the same size as the first")
+    ap.add_argument("--cache-limit", type=float, default=0.85, help="hold the size when the conversation space got fuller than this")
     ap.add_argument("--max-len", type=int, default=12288, help="longest conversation the server accepts (tokens)")
     ap.add_argument("--gpu-mem", type=float, default=0.90, help="share of each GPU's memory the server may use")
     ap.add_argument("--job-timeout", type=int, default=1800, help="seconds before one job is stopped and counted as failed")
@@ -191,7 +236,7 @@ def main():
             problem = reachable(base, key)
             if problem:
                 sys.exit(f"stopping before any job starts: {problem}")
-            eval_model, servers, per_gpu, gpus = a.model, [(base, key)], a.workers_per_gpu or 8, 0
+            eval_model, servers, per_gpu, gpus = a.model, [(base, key)], a.start_per_gpu or 8, 0
         else:
             gpus = gpu_count()
             if not gpus:
@@ -207,23 +252,54 @@ def main():
                 servers.append((f"http://127.0.0.1:{port}/v1", "none"))
             conc = [reported_concurrency(log) for _, _, log in procs]
             known = [c for c in conc if c]
-            per_gpu = a.workers_per_gpu or max(2, math.ceil(2 * min(known))) if known else (a.workers_per_gpu or 4)
-            print(f"each server reports room for {known or 'an unknown number of'} full-length conversations; running {per_gpu} jobs per GPU")
+            per_gpu = a.start_per_gpu or (max(2, math.ceil(min(known))) if known else 4)
+            print(f"each server reports room for {known or 'an unknown number of'} full-length conversations; first batch: {per_gpu} jobs per GPU")
             report["vllm_reported_concurrency"] = conc
 
-        workers = per_gpu * len(servers)
-        print(f"{len(tasks)} tasks x {a.repeats} repeats = {len(jobs)} jobs, {min(workers, len(jobs))} at a time")
-        sampler = GpuSampler()
+        n_srv = len(servers)
+        level = per_gpu * n_srv                      # jobs in the current batch
+        cap = a.max_per_gpu * n_srv
+        can_scale = not a.no_autoscale and bool(procs)   # gauges exist only for servers we started
+        metrics = [u.rsplit("/v1", 1)[0] + "/metrics" for u, _ in servers] if procs else []
+        sampler = GpuSampler(metrics)
         sampler.start()
+        pending = list(jobs)
+        print(f"{len(tasks)} tasks x {a.repeats} repeats = {len(jobs)} jobs; first batch {min(level, len(pending))} jobs" + ("" if can_scale else " (fixed size)"))
         t0 = time.time()
-        failed, rows = 0, []
-        with ThreadPoolExecutor(max_workers=workers) as ex:
-            futs = [ex.submit(run_job, eval_model, k, t, out, a.greedy, a.job_timeout, *servers[i % len(servers)]) for i, (k, t) in enumerate(jobs)]
-            for n, fu in enumerate(as_completed(futs), 1):
-                k, tid, secs, status = fu.result()
-                rows.append((k, tid, round(secs, 1), status))
-                failed += status not in ("ok", "skipped")
-                print(f"[{n}/{len(jobs)}] run {k} task {tid}: {status} ({secs:.0f} s)")
+        failed, rows, log_rows, good, frozen, batch_no, done = 0, [], [], level, False, 0, 0
+        while pending:
+            batch, pending = pending[:level], pending[level:]
+            batch_no += 1
+            sampler.new_batch()
+            tb = time.time()
+            nfail = 0
+            with ThreadPoolExecutor(max_workers=len(batch)) as ex:
+                futs = [ex.submit(run_job, eval_model, k, t, out, a.greedy, a.job_timeout, *servers[i % n_srv]) for i, (k, t) in enumerate(batch)]
+                for fu in as_completed(futs):
+                    k, tid, secs, status = fu.result()
+                    rows.append((k, tid, round(secs, 1), status))
+                    nfail += status not in ("ok", "skipped")
+                    done += 1
+                    print(f"[{done}/{len(jobs)}] run {k} task {tid}: {status} ({secs:.0f} s)")
+            failed += nfail
+            bs = sampler.batch_summary()
+            secs_b = time.time() - tb
+            # decide the next batch size from what this batch did
+            if not can_scale or frozen or not pending:
+                decision, nxt = "fixed" if not can_scale else ("kept" if pending else "last batch"), level
+            elif nfail:
+                decision, nxt, frozen = f"{nfail} job(s) failed: back to {good}, stop growing", good, True
+            elif bs["peak_waiting"] > 0 or bs["peak_cache_usage"] > a.cache_limit:
+                decision, nxt, frozen = "at capacity (requests waited or conversation space nearly full): hold", level, True
+            else:
+                good = level
+                nxt = min(cap, math.ceil(level * 1.5))
+                decision = f"room left: grow to {nxt}" if nxt > level else "at the maximum"
+            log_rows.append(dict(batch=batch_no, jobs=len(batch), seconds=round(secs_b), jobs_per_min=round(len(batch) / secs_b * 60, 2),
+                                 failed=nfail, next_size=nxt, decision=decision, **bs))
+            print(f"batch {batch_no}: {len(batch)} jobs in {secs_b:.0f} s, util {bs['avg_util_pct']}%, space used {bs['peak_cache_usage']}, "
+                  f"waiting {bs['peak_waiting']}, failed {nfail} -> {decision}")
+            level = nxt
         wall = time.time() - t0
         gpu_stats = sampler.finish()
     finally:
@@ -240,10 +316,16 @@ def main():
         if new:
             w.writerow(["run", "task", "seconds", "status"])
         w.writerows(sorted(rows))
-    report.update(model=a.model, gpus=gpus, jobs=len(jobs), workers_total=workers, failed_jobs=failed, wall_minutes=round(wall / 60, 2),
+    report.update(model=a.model, gpus=gpus, jobs=len(jobs), final_batch_size=level, batches=batch_no, failed_jobs=failed, wall_minutes=round(wall / 60, 2),
                   jobs_per_minute=round(len(jobs) / wall * 60, 2) if wall else 0, gpu_hours=round(wall / 3600 * gpus, 3), per_gpu=gpu_stats,
                   max_len=a.max_len, gpu_mem=a.gpu_mem)
+    report["batches_log"] = log_rows
     (out / "hardware_report.json").write_text(json.dumps(report, indent=1))
+    if log_rows:
+        with open(out / "autoscale_log.csv", "w", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=list(log_rows[0].keys()))
+            w.writeheader()
+            w.writerows(log_rows)
 
     merge(out, tasks, a.repeats)
     print(f"done in {wall / 60:.1f} min wall-clock, {report['gpu_hours']} GPU-hours; {failed} failed job(s)")
