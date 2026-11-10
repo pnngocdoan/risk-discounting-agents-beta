@@ -1,14 +1,20 @@
-"""Shared by scripts 5 and 6: the audit spreadsheet (read, write) and the Anthropic API call."""
+"""Shared by scripts 3 to 6: the audit workbook (one tab per step), the trajectory text, and the Anthropic API call."""
 import json
 import re
 import urllib.request
+from pathlib import Path
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font
 
-TASK_COLS = ["task", "instruction", "risks", "risky_action", "harm", "p_line"]
-TRAJ_COLS = ["task", "run", "verdict", "completed", "validity_reason", "outcome_line", "use", "history_text"]
-WIDTHS = {"tasks": [8, 60, 30, 50, 30, 70], "trajectories": [8, 6, 9, 10, 50, 50, 6, 90]}
+# tab name: (columns, column widths). One tab per step.
+TABS = {
+    "runs":       (["task", "run", "instruction", "history_text"], [8, 6, 50, 90]),                                    # step 3
+    "filtered":   (["task", "run", "duplicate_of", "completed", "validity_reason", "verdict", "use"], [8, 6, 12, 10, 60, 9, 6]),   # step 4
+    "p_lines":    (["task", "instruction", "risks", "risky_action", "harm", "p_line"], [8, 60, 30, 50, 30, 70]),       # step 5
+    "histories":  (["task", "order", "run", "outcome_line", "history_text"], [8, 6, 6, 50, 90]),                       # step 5
+    "conditions": (["condition", "task", "added_to_prompt"], [16, 8, 120]),                                            # step 6
+}
 
 
 def ask(url, key, model, effort, prompt, max_tokens=2000, timeout=120):
@@ -35,34 +41,52 @@ def try_twice(fn):
     return None
 
 
-def read_audit(path):
-    """({task: row}, {(task, run): row}) from the sheets, empty if the file or a sheet is missing. Every cell is text."""
-    tasks, trajs = {}, {}
-    try:
-        wb = load_workbook(path)
-    except Exception:
-        return tasks, trajs
-    for name, cols, store in (("tasks", TASK_COLS, tasks), ("trajectories", TRAJ_COLS, trajs)):
-        if name not in wb.sheetnames:
-            continue
-        for r in wb[name].iter_rows(min_row=2, values_only=True):
-            if r and r[0] is not None:
-                d = {c: ("" if v is None else str(v)) for c, v in zip(cols, r)}
-                store[d["task"] if name == "tasks" else (d["task"], d["run"])] = d
-    return tasks, trajs
+def history_text_of(item):
+    """The agent's actions and what came back, in order, as it goes into the prompt. The final reply is the last action."""
+    lines = []
+    for m in item.get("output", []):
+        role = m.get("role")
+        if role == "assistant" and m.get("tool_calls"):
+            for tc in m["tool_calls"]:
+                fn = tc.get("function", tc)
+                lines.append(f"Action: {fn.get('name')}({fn.get('arguments')})")
+        elif role == "tool":
+            lines.append(f"Observation: {m.get('content')}")
+        elif role == "assistant":
+            lines.append(f"Action: {m.get('content')}")
+    return "\n".join(lines)
 
 
-def write_audit(path, tasks, trajs):
+def read_tabs(path):
+    """{tab name: [row dicts, every cell as text]} for the tabs that exist; {} if the file does not exist."""
+    out = {}
+    if not Path(path).exists():
+        return out
+    wb = load_workbook(path)
+    for name, (cols, _) in TABS.items():
+        if name in wb.sheetnames:
+            out[name] = [{c: ("" if v is None else str(v)) for c, v in zip(cols, r)}
+                         for r in wb[name].iter_rows(min_row=2, values_only=True) if r and r[0] is not None]
+    return out
+
+
+def write_tab(path, name, rows):
+    """Replace one tab, keep the other tabs as they are."""
+    path = Path(path)
+    tabs = read_tabs(path)
+    tabs[name] = rows
     wb = Workbook()
     wb.remove(wb.active)
-    for name, cols, rows in (("tasks", TASK_COLS, list(tasks.values())), ("trajectories", TRAJ_COLS, list(trajs.values()))):
-        ws = wb.create_sheet(name)
+    for tab, (cols, widths) in TABS.items():
+        if tab not in tabs:
+            continue
+        ws = wb.create_sheet(tab)
         ws.append(cols)
-        for r in rows:
-            ws.append([r.get(c, "") for c in cols])
+        for r in tabs[tab]:
+            ws.append([str(r.get(c, ""))[:32000] for c in cols])   # a cell holds at most 32767 characters
         for c in ws[1]:
             c.font = Font(bold=True)
-        for col, w in zip("ABCDEFGH", WIDTHS[name]):
+        for col, w in zip("ABCDEFGH", widths):
             ws.column_dimensions[col].width = w
         for row in ws.iter_rows(min_row=2):
             for c in row:
@@ -72,6 +96,6 @@ def write_audit(path, tasks, trajs):
     wb.save(path)
 
 
-def sort_key(k):
-    task, run = k
+def sort_key(task, run="0"):
+    task, run = str(task), str(run)
     return (0, int(task), int(run)) if task.isdigit() and run.isdigit() else (1, task, run)
