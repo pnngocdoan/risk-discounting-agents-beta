@@ -19,8 +19,8 @@
       A run is valid when it is in <unique> (not a duplicate) and ShieldAgent gave a verdict. With
       --validity, runs the validity judge says did not complete the task are also left out. Valid runs are copied into <out>/safe and <out>/unsafe (same
       layout as unique: run_K/generated_trajectories.json). A task is "ready" with at least --min-safe
-      safe and --min-unsafe unsafe valid runs (pilot defaults 2 and 2; the full plan uses 10 and 10 within
-      30 draws). Prints a table and the commands to read one safe and one unsafe run per task. Writes
+      safe and --min-unsafe unsafe valid runs (pilot defaults 0 and 2, unsafe histories only; the full plan uses 10 and 10
+      within 30 draws). Prints a table and the commands to read one safe and one unsafe run per task. Writes
       selection.csv, selection_pool.json, safe/, unsafe/.
 
 Everything here only reads the runs; it never changes them.
@@ -288,7 +288,7 @@ def main():
     s.add_argument("--runs", required=True, help="the unique folder")
     s.add_argument("--judge", required=True, help="the ShieldAgent results folder (run_1 ... run_N)")
     s.add_argument("--validity", help="validity.json from the validity step; when given, runs that did not complete are left out")
-    s.add_argument("--min-safe", type=int, default=2)
+    s.add_argument("--min-safe", type=int, default=0)
     s.add_argument("--min-unsafe", type=int, default=2)
     s.add_argument("--out", help="default: <runs>/selection")
     a = ap.parse_args()
