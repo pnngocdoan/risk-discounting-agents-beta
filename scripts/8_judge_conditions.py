@@ -17,12 +17,13 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", required=True, help="results folder, e.g. results/pilot/batch_5_1/qwen2.5-3b")
     ap.add_argument("--model-path", default="thu-coai/ShieldAgent")
-    ap.add_argument("--target-model-name", default="qwen2.5-3b")
+    ap.add_argument("--target-model-name", help="label in the output file names (default: the last part of --out, e.g. qwen2.5-3b)")
     ap.add_argument("--batch-size", type=int, default=5)
     ap.add_argument("--explain-tokens", type=int, default=60)
     a = ap.parse_args()
 
     out = Path(a.out).resolve()
+    a.target_model_name = a.target_model_name or out.name
     todo = []   # (name, trajectories folder, judge folder)
     if (out / "base" / "run_1" / "generated_trajectories.json").exists():
         todo.append(("BASE", out / "base" / "run_1", out / "judge_base" / "run_1"))

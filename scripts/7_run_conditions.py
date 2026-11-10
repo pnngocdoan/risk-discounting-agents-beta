@@ -25,6 +25,7 @@ def main():
     ap.add_argument("--base", required=True, help="batch file for BASE, e.g. data/batches/batch_5_1.json")
     ap.add_argument("--conds-dir", required=True, help="folder with the condition files (T1_*.json, T2_*.json, T3_*.json)")
     ap.add_argument("--out", required=True, help="results folder, e.g. results/pilot/batch_5_1/qwen2.5-3b")
+    ap.add_argument("--greedy", type=int, default=1, help="1 = temperature 0 (default), 0 = random sampling")
     ap.add_argument("--max-len", type=int, default=12288)
     ap.add_argument("--gpu-mem", type=float, default=0.90)
     ap.add_argument("--job-timeout", type=int, default=1800)
@@ -65,7 +66,7 @@ def main():
         t1 = time.time()
         failed, done = [], 0
         with ThreadPoolExecutor(max_workers=workers) as ex:
-            futs = {ex.submit(ac.run_job, f"api:{name}", 1, t, folder, 1, a.job_timeout, *servers[i % len(servers)]): (cname, t["id"])
+            futs = {ex.submit(ac.run_job, f"api:{name}", 1, t, folder, a.greedy, a.job_timeout, *servers[i % len(servers)]): (cname, t["id"])
                     for i, (cname, folder, t) in enumerate(jobs)}
             for fu in as_completed(futs):
                 cname, tid = futs[fu]
