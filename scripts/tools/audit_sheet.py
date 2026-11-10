@@ -1,11 +1,5 @@
-"""Shared by scripts 3 to 9: the audit workbook (one tab per step), the trajectory text, and the Anthropic API call.
-
-Every tab is saved to the local audit.xlsx. If the environment variables GOOGLE_SHEET_ID (the id in the sheet's URL)
-and GOOGLE_SERVICE_ACCOUNT_JSON (the service account's key file, as text) are set, the same tab is also written to
-that Google Sheet after every step, and the tabs are read back from the Google Sheet, so edits made there are used.
-"""
+"""Shared by scripts 3 to 6: the audit workbook (one tab per step), the trajectory text, and the Anthropic API call."""
 import json
-import os
 import re
 import urllib.request
 from pathlib import Path
@@ -64,37 +58,9 @@ def history_text_of(item):
     return "\n".join(lines)
 
 
-def _google():
-    """The Google spreadsheet (gspread) when GOOGLE_SHEET_ID and GOOGLE_SERVICE_ACCOUNT_JSON are set, else None."""
-    sid, key = os.environ.get("GOOGLE_SHEET_ID"), os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
-    if not (sid and key):
-        return None
-    try:
-        import gspread
-        return gspread.service_account_from_dict(json.loads(key)).open_by_key(sid)
-    except Exception as e:
-        print(f"WARNING: cannot open the Google Sheet ({type(e).__name__}: {e}); using the local audit.xlsx only")
-        return None
-
-
 def read_tabs(path):
-    """{tab name: [row dicts, every cell as text]} for the tabs that have rows. Read from the Google Sheet when it is
-    set up (so edits made there count), otherwise from the local file; {} if there is neither."""
+    """{tab name: [row dicts, every cell as text]} for the tabs that exist; {} if the file does not exist."""
     out = {}
-    sh = _google()
-    if sh is not None:
-        try:
-            for ws in sh.worksheets():
-                if ws.title in TABS:
-                    vals = ws.get_all_values()
-                    if len(vals) > 1:
-                        head = vals[0]
-                        out[ws.title] = [{c: (r[head.index(c)] if c in head and head.index(c) < len(r) else "") for c in TABS[ws.title][0]}
-                                         for r in vals[1:] if r and r[0] != ""]
-            return out
-        except Exception as e:
-            print(f"WARNING: cannot read the Google Sheet ({type(e).__name__}: {e}); reading the local audit.xlsx")
-            out = {}
     if not Path(path).exists():
         return out
     wb = load_workbook(path)
@@ -129,30 +95,6 @@ def write_tab(path, name, rows):
         ws.freeze_panes = "A2"
     path.parent.mkdir(parents=True, exist_ok=True)
     wb.save(path)
-    push_tab(name, tabs[name])
-
-
-def push_tab(name, rows):
-    """Write one tab to the Google Sheet, if it is set up. A failure only prints a warning: the local file is saved."""
-    sh = _google()
-    if sh is None:
-        return
-    cols = TABS[name][0]
-    try:
-        try:
-            ws = sh.worksheet(name)
-        except Exception:
-            ws = sh.add_worksheet(title=name, rows=max(len(rows) + 1, 2), cols=len(cols))
-        ws.clear()
-        ws.resize(rows=max(len(rows) + 1, 2), cols=len(cols))
-        data = [cols] + [[str(r.get(c, ""))[:32000] for c in cols] for r in rows]
-        for i in range(0, len(data), 100):   # in pieces, so one request stays small
-            ws.update(values=data[i:i + 100], range_name=f"A{i + 1}", value_input_option="RAW")
-        ws.freeze(rows=1)
-        ws.format("1:1", {"textFormat": {"bold": True}})
-        print(f"  Google Sheet: wrote the tab '{name}' ({len(rows)} rows)")
-    except Exception as e:
-        print(f"WARNING: could not write the tab '{name}' to the Google Sheet ({type(e).__name__}: {e}); it is saved in the local audit.xlsx")
 
 
 def sort_key(task, run="0"):
