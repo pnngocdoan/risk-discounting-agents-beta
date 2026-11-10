@@ -92,7 +92,8 @@ def main():
     for k in ks:
         traj = {t["id"]: t for t in (load(runs_dir / f"run_{k}" / "generated_trajectories.json") or [])}
         verdicts = verdicts_for_run(a.judge, k)
-        for tid in sorted(set(traj) | set(verdicts)):
+        # in the deduplicated folder, repeats that were dropped as duplicates are absent on purpose
+        for tid in sorted(set(traj) if (runs_dir / "dedupe.csv").exists() else set(traj) | set(verdicts)):
             part = runs_dir / f"run_{k}" / "parts" / str(tid)
             why = []
             t = traj.get(tid)
