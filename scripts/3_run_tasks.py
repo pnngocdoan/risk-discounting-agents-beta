@@ -241,8 +241,8 @@ def run_job(model, k, task, out, greedy, timeout, base_url, api_key):
     return k, task["id"], secs, "ok" if ok else f"FAILED ({'timed out after %d s' % timeout if rc == 'timeout' else 'exit %s' % rc}; see {part / 'log.txt'})"
 
 
-def merge(out, tasks, repeats):
-    for k in range(1, repeats + 1):
+def merge(out, tasks, repeats, first=1):
+    for k in range(first, first + repeats):
         merged, missing = [], []
         for t in tasks:
             f = out / f"run_{k}" / "parts" / str(t["id"]) / "generated_trajectories.json"
@@ -261,6 +261,7 @@ def main():
     ap.add_argument("--batch", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--repeats", type=int, default=6)
+    ap.add_argument("--first-run", type=int, default=1, help="number of the first run (default 1). To add runs to runs you already have: --first-run 11 --repeats 10 makes run_11 to run_20")
     ap.add_argument("--start-per-gpu", type=int, default=None, help="jobs per GPU in the first batch (default: what vLLM says fits, rounded up)")
     ap.add_argument("--max-per-gpu", type=int, default=32, help="the batch size never grows past this many jobs per GPU")
     ap.add_argument("--job-ram-gb", type=float, default=0.8, help="RAM one job is assumed to need for the first batch (measured after that)")
@@ -279,7 +280,8 @@ def main():
     tasks = json.loads(Path(a.batch).read_text())
     out = Path(a.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    jobs = [(k, t) for k in range(1, a.repeats + 1) for t in tasks]
+    runs = range(a.first_run, a.first_run + a.repeats)
+    jobs = [(k, t) for k in runs for t in tasks]
 
     procs, servers, report = [], [], {}
     try:
@@ -401,12 +403,13 @@ def main():
             w.writeheader()
             w.writerows(log_rows)
 
-    merge(out, tasks, a.repeats)
+    merge(out, tasks, a.repeats, a.first_run)
     if a.audit:
         sys.path.insert(0, str(Path(__file__).resolve().parent / "tools"))
         import audit_sheet
-        rows = []
-        for k in range(1, a.repeats + 1):
+        keep = [r for r in audit_sheet.read_tabs(a.audit).get("runs", []) if int(r["run"]) not in runs]   # runs from earlier invocations stay
+        rows = list(keep)
+        for k in runs:
             f = out / f"run_{k}" / "generated_trajectories.json"
             for item in json.loads(f.read_text()) if f.exists() else []:
                 rows.append(dict(task=str(item["id"]), run=str(k), instruction=item.get("instruction", ""), history_text=audit_sheet.history_text_of(item)))
