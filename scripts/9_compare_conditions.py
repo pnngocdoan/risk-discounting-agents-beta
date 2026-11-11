@@ -9,7 +9,7 @@ changes against BASE: safe to unsafe is "more unsafe", unsafe to safe is "less u
 per task and condition, so this is a count of tasks, not a statistic.
 
 With --audit <audit.xlsx> it also writes the tab "results": one row per condition and task with the ShieldAgent
-verdict (safe / unsafe), the BASE verdict, the change against BASE (more unsafe / less unsafe / same) and an empty
+verdict (safe / unsafe), the BASE verdict and the change against BASE, the T0 verdict and the change against T0 (more unsafe / less unsafe / same) and an empty
 "analysis" column for your notes. Run it again after a new judging: the verdicts are refreshed, the analysis cells
 you typed stay.
 """
@@ -36,7 +36,7 @@ def verdicts(folder):
 def order(name):
     group = name.split("_")[0]
     nums = [int(x) for x in "".join(c if c.isdigit() else " " for c in name).split()]
-    return ({"T1": 1, "T2": 2, "T3": 3}.get(group, 9), nums)
+    return ({"T0": 0, "T1": 1, "T2": 2, "T3": 3}.get(group, 9), nums)
 
 
 def main():
@@ -57,20 +57,27 @@ def main():
     print("\nunsafe count (tasks judged):")
     for n in names:
         print(f"  {n:<{w}} {sum(v == 'U' for v in cols[n].values())} of {len(cols[n])}")
-    print("\nchanges against BASE:")
     base = cols["BASE"]
-    for group in ("T1", "T2", "T3"):
-        more, less = [], []
-        for n in names:
-            if not n.startswith(group + "_"):
-                continue
-            for t, v in cols[n].items():
-                if t in base and base[t] == "S" and v == "U":
-                    more.append(f"task {t} in {n}")
-                if t in base and base[t] == "U" and v == "S":
-                    less.append(f"task {t} in {n}")
-        print(f"  {group}: more unsafe (S to U): {', '.join(more) or 'none'}")
-        print(f"  {group}: less unsafe (U to S): {', '.join(less) or 'none'}")
+    t0 = cols.get("T0", {})
+
+    def changes(ref, label, groups):
+        print(f"\nchanges against {label}:")
+        for group in groups:
+            more, less = [], []
+            for n in names:
+                if n != group and not n.startswith(group + "_"):
+                    continue
+                for t, v in cols[n].items():
+                    if ref.get(t) == "S" and v == "U":
+                        more.append(f"task {t} in {n}")
+                    if ref.get(t) == "U" and v == "S":
+                        less.append(f"task {t} in {n}")
+            print(f"  {group}: more unsafe (S to U): {', '.join(more) or 'none'}")
+            print(f"  {group}: less unsafe (U to S): {', '.join(less) or 'none'}")
+
+    changes(base, "BASE", ("T0", "T1", "T2", "T3"))
+    if t0:
+        changes(t0, "T0 (the risk named, no number; the reference for T1, T2 and T3)", ("T1", "T2", "T3"))
     could = [t for t in tasks if base.get(t) == "S"]
     if a.audit:
         old = {(r["condition"], r["task"]): r for r in sheet.read_tabs(a.audit).get("results", [])}
@@ -78,9 +85,11 @@ def main():
         rows = []
         for n in names:
             for t in sorted(cols[n], key=sheet.sort_key):
-                b, v = base.get(t), cols[n][t]
-                change = "" if n == "BASE" or not b else ("same" if b == v else "more unsafe" if v == "U" else "less unsafe")
-                rows.append(dict(condition=n, task=str(t), verdict=word[v], base_verdict=word.get(b, ""), change=change,
+                b, z, v = base.get(t), t0.get(t), cols[n][t]
+                diff = lambda ref: "" if not ref else ("same" if ref == v else "more unsafe" if v == "U" else "less unsafe")
+                rows.append(dict(condition=n, task=str(t), verdict=word[v], base_verdict=word.get(b, ""),
+                                 change="" if n == "BASE" else diff(b),
+                                 t0_verdict=word.get(z, ""), change_vs_t0="" if n in ("BASE", "T0") or not t0 else diff(z),
                                  analysis=old.get((n, str(t)), {}).get("analysis", "")))
         sheet.write_tab(a.audit, "results", rows)
         print(f"\nwrote the tab 'results' ({len(rows)} rows) in {a.audit}")
