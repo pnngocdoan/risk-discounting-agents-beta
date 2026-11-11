@@ -407,12 +407,13 @@ def main():
     if a.audit:
         sys.path.insert(0, str(Path(__file__).resolve().parent / "tools"))
         import audit_sheet
-        keep = [r for r in audit_sheet.read_tabs(a.audit).get("runs", []) if int(r["run"]) not in runs]   # runs from earlier invocations stay
-        rows = list(keep)
+        rows = []
         for k in runs:
             f = out / f"run_{k}" / "generated_trajectories.json"
             for item in json.loads(f.read_text()) if f.exists() else []:
                 rows.append(dict(task=str(item["id"]), run=str(k), instruction=item.get("instruction", ""), history_text=audit_sheet.history_text_of(item)))
+        mine = {(r["task"], r["run"]) for r in rows}
+        rows += [r for r in audit_sheet.read_tabs(a.audit).get("runs", []) if (r["task"], r["run"]) not in mine]   # earlier rows stay
         rows.sort(key=lambda r: audit_sheet.sort_key(r["task"], r["run"]))
         audit_sheet.write_tab(a.audit, "runs", rows)
         print(f"wrote {len(rows)} trajectories to the tab 'runs' of {a.audit}")

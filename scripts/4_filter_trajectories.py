@@ -97,11 +97,9 @@ def main():
     text = {(r["task"], r["run"]): r["history_text"] for r in tabs.get("runs", [])}
 
     rows, items, first = {}, {}, {}
-    # Runs that are in the sheet but not in the folders (kept from an earlier invocation) stay as they are, and a new
-    # run whose text is the same as an earlier run of the same task counts as its duplicate.
-    on_disk = {p.name.split("_")[1] for p in Path(a.runs).glob("run_*")}
-    kept = {k: r for k, r in old.items() if k[1] not in on_disk}
-    for k, r in kept.items():
+    # Rows that are in the sheet but not in the folders (earlier runs, whose files may be gone) stay as they are, and a
+    # new run whose text equals an earlier run of the same task counts as its duplicate.
+    for k, r in old.items():
         if text.get(k):
             first.setdefault(("text", k[0], text[k]), k[1])
     for run in sorted(Path(a.runs).glob("run_*"), key=lambda p: int(p.name.split("_")[1])):
@@ -146,7 +144,7 @@ def main():
             if len(text.get(k) or sheet.history_text_of(items[k])) > 32000 and row["use"] == "yes":
                 row["use"] = "no"
                 print(f"task {k[0]} run {k[1]}: longer than a spreadsheet cell holds, so use = no")
-    rows.update({k: dict(r, task=k[0], run=k[1]) for k, r in kept.items()})
+    rows.update({k: dict(r, task=k[0], run=k[1]) for k, r in old.items() if k not in rows})
     out_rows = [rows[k] for k in sorted(rows, key=lambda k: sheet.sort_key(*k))]
     sheet.write_tab(a.audit, "filtered", out_rows)
 
