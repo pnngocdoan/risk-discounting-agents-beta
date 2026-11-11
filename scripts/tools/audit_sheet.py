@@ -20,7 +20,7 @@ TABS = {
     "p_lines":    (["task", "instruction", "risks", "risky_action", "harm", "p_line"], [8, 60, 30, 50, 30, 70]),       # step 5
     "histories":  (["task", "order", "run", "outcome_line", "history_text"], [8, 6, 6, 50, 90]),                       # step 5
     "conditions": (["condition", "task", "added_to_prompt"], [16, 8, 120]),                                            # step 6
-    "results":    (["condition", "task", "verdict", "base_verdict", "change", "analysis"], [16, 8, 10, 13, 16, 80]),   # step 9
+    "results":    (["condition", "task", "verdict", "base_verdict", "change", "t0_verdict", "change_vs_t0", "analysis"], [16, 8, 10, 13, 16, 12, 16, 80]),   # step 9
 }
 
 
@@ -100,8 +100,11 @@ def read_tabs(path):
     wb = load_workbook(path)
     for name, (cols, _) in TABS.items():
         if name in wb.sheetnames:
-            out[name] = [{c: ("" if v is None else str(v)) for c, v in zip(cols, r)}
-                         for r in wb[name].iter_rows(min_row=2, values_only=True) if r and r[0] is not None]
+            rows = list(wb[name].iter_rows(values_only=True))
+            head = [str(h) for h in (rows[0] if rows else [])]
+            # columns are found by their header name, so a tab written with older columns still reads
+            out[name] = [{c: ("" if c not in head or head.index(c) >= len(r) or r[head.index(c)] is None else str(r[head.index(c)])) for c in cols}
+                         for r in rows[1:] if r and r[0] is not None]
     return out
 
 
