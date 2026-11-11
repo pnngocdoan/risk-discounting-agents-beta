@@ -91,11 +91,13 @@ def main():
     ap.add_argument("--model", default="claude-sonnet-5-5")
     ap.add_argument("--effort", default="medium", choices=["low", "medium", "high"], help="how much the model thinks before answering")
     ap.add_argument("--workers", type=int, default=4)
-    ap.add_argument("--api-url", default="https://api.anthropic.com/v1/messages")
+    ap.add_argument("--api-url", default="https://api.anthropic.com/v1/messages",
+                    help="another provider's OpenAI-style chat URL works too (with --model and --key-env), e.g. https://generativelanguage.googleapis.com/v1beta/openai/chat/completions")
+    ap.add_argument("--key-env", default="ANTHROPIC_API_KEY", help="the environment variable that holds the API key")
     a = ap.parse_args()
-    key = os.environ.get("ANTHROPIC_API_KEY")
+    key = os.environ.get(a.key_env)
     if not key:
-        raise SystemExit("set ANTHROPIC_API_KEY first")
+        raise SystemExit(f"set {a.key_env} first")
     tabs = sheet.read_tabs(a.audit)
     if "filtered" not in tabs or "runs" not in tabs:
         raise SystemExit("the audit sheet needs the tabs 'runs' and 'filtered'; run steps 3 and 4 first")

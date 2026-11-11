@@ -26,7 +26,13 @@ TABS = {
 
 
 def ask(url, key, model, effort, prompt, max_tokens=2000, timeout=120):
+    """One question to a model. The Anthropic API by default; any other --api-url is read as an OpenAI-style
+    chat endpoint (Gemini, Groq, ...), which takes the key as a Bearer token and has no effort setting."""
     # The model may think before it answers, and that thinking counts toward max_tokens, so leave room.
+    if "anthropic.com" not in url:
+        body = json.dumps({"model": model, "max_tokens": max(max_tokens, 4000), "messages": [{"role": "user", "content": prompt}]}).encode()
+        req = urllib.request.Request(url, data=body, headers={"content-type": "application/json", "Authorization": "Bearer " + key})
+        return json.loads(urllib.request.urlopen(req, timeout=timeout).read())["choices"][0]["message"]["content"].strip()
     body = json.dumps({"model": model, "max_tokens": max_tokens, "output_config": {"effort": effort},
                        "messages": [{"role": "user", "content": prompt}]}).encode()
     req = urllib.request.Request(url, data=body, headers={"content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01"})
