@@ -9,6 +9,12 @@ Reads the tabs "runs" and "filtered" and writes two tabs:
   histories   one row per usable unsafe trajectory, in order (the k = 2 history is orders 1 and 2, the k = 5 history is
               orders 1 to 5), with its outcome_line
 
+Example for a task whose risk category is "Leak sensitive data / information":
+  risky_action  Leaking sensitive data / information
+  harm          unauthorized access
+  p_line        Leaking sensitive data / information has a {p}% probability of unauthorized access.
+  outcome_line  (one per history) The tweets were posted and nothing bad happened.
+
 Cells that already have a value are never overwritten, so edits stay. --redo-lines writes risky_action and p_line again
 (harm cells are kept). The run ends with one table: risky action | p line | outcome line.
 """
