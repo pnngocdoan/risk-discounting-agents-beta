@@ -133,7 +133,8 @@ def main():
                 except Exception:
                     pass
 
-    rows = [done[f"{c}:{t}"] for c, t, _ in prompts if f"{c}:{t}" in done]
+    # An answer can be parsed without a usable number (predicted_p is null); count it as unread instead of crashing on it.
+    rows = [done[f"{c}:{t}"] for c, t, _ in prompts if f"{c}:{t}" in done and done[f"{c}:{t}"].get("predicted_p") is not None]
     unparsed = len(prompts) - len(rows)
     tasks = sorted({t for _, t, _ in prompts}, key=sheet.sort_key)
     conds = list(files)
