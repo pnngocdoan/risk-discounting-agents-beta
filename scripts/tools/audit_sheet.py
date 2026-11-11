@@ -7,6 +7,8 @@ that Google Sheet after every step, and the tabs are read back from the Google S
 import json
 import os
 import re
+import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -25,6 +27,14 @@ TABS = {
 }
 
 
+def _open(req, timeout):
+    """urlopen that puts the server's own error message in the exception (a bare 'HTTP Error 400' says nothing)."""
+    try:
+        return urllib.request.urlopen(req, timeout=timeout)
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"HTTP {e.code}: {e.read().decode('utf-8', 'replace')[:400]}") from None
+
+
 def ask(url, key, model, effort, prompt, max_tokens=2000, timeout=120):
     """One question to a model. The Anthropic API by default; any other --api-url is read as an OpenAI-style
     chat endpoint (Gemini, Groq, ...), which takes the key as a Bearer token and has no effort setting."""
@@ -32,11 +42,11 @@ def ask(url, key, model, effort, prompt, max_tokens=2000, timeout=120):
     if "anthropic.com" not in url:
         body = json.dumps({"model": model, "max_tokens": max(max_tokens, 4000), "messages": [{"role": "user", "content": prompt}]}).encode()
         req = urllib.request.Request(url, data=body, headers={"content-type": "application/json", "Authorization": "Bearer " + key})
-        return json.loads(urllib.request.urlopen(req, timeout=timeout).read())["choices"][0]["message"]["content"].strip()
+        return json.loads(_open(req, timeout).read())["choices"][0]["message"]["content"].strip()
     body = json.dumps({"model": model, "max_tokens": max_tokens, "output_config": {"effort": effort},
                        "messages": [{"role": "user", "content": prompt}]}).encode()
     req = urllib.request.Request(url, data=body, headers={"content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01"})
-    reply = json.loads(urllib.request.urlopen(req, timeout=timeout).read())
+    reply = json.loads(_open(req, timeout).read())
     return "".join(b.get("text", "") for b in reply["content"] if b.get("type") == "text").strip()
 
 
@@ -44,14 +54,30 @@ def json_of(text):
     return json.loads(re.search(r"\{.*\}", text, re.S).group(0))
 
 
+_SEEN = set()
+
+
 def try_twice(fn):
-    for _ in range(2):
+    """Call fn up to 4 times. After a rate-limit or server error (HTTP 429, 5xx) it waits (5, 10, 15 s) before trying again.
+    The error is printed once per distinct message, so a wrong key, a wrong model name or a rate limit shows up instead of
+    only 'no answer'."""
+    for n in range(4):
+        wait = 0
         try:
             r = fn()
             if r:
                 return r
-        except Exception:
-            pass
+        except Exception as e:
+            msg = str(e)[:300]
+            if msg not in _SEEN:
+                _SEEN.add(msg)
+                print(f"  API error: {type(e).__name__}: {msg}")
+            daily = "per day" in msg.lower() or "perday" in msg.lower()
+            if msg.startswith("HTTP 4") and (not msg.startswith("HTTP 429") or daily):
+                return None          # a wrong key or model name, or a daily quota that is used up: trying again will not help
+            wait = 5 * (n + 1)
+        if wait and n < 3:
+            time.sleep(wait)
     return None
 
 
