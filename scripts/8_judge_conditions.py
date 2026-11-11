@@ -8,8 +8,9 @@ Both flags can be given in one call.
 
 BASE and conditions:
 
-Reads  <out>/base/run_1 and <out>/cond/<name>/run_1  (written by 7_run_conditions.py)
-Writes <out>/judge_base/run_1 and <out>/judge_cond/<name>  (the folders 9_compare_conditions.py reads)
+Reads  <out>/base/run_k and <out>/cond/<name>/run_k  (written by 7_run_conditions.py; every run_k that exists)
+Writes <out>/judge_base/run_k and, for run 1, <out>/judge_cond/<name>; for run k >= 2, <out>/judge_cond_run_k/<name>
+(the folders 9_compare_conditions.py reads)
 
 Uses the same judge code and settings as the one-file command (explanation of 60 tokens after the verdict).
 A folder that already has results is skipped. Run it after the model servers have stopped.
@@ -41,11 +42,17 @@ def main():
         for d in sorted(h.glob("run_*"), key=lambda p: int(p.name.split("_")[1])):
             if (d / "generated_trajectories.json").exists():
                 todo.append((d.name, d, h.parent / "judge_histories" / d.name))
-    if a.out and (out / "base" / "run_1" / "generated_trajectories.json").exists():
-        todo.append(("BASE", out / "base" / "run_1", out / "judge_base" / "run_1"))
-    for d in sorted((out / "cond").glob("*/run_1")) if a.out else []:
-        if (d / "generated_trajectories.json").exists():
-            todo.append((d.parent.name, d, out / "judge_cond" / d.parent.name))
+    def run_no(p):
+        return int(p.name.split("_")[1])
+    if a.out:
+        for d in sorted((out / "base").glob("run_*"), key=run_no):
+            if (d / "generated_trajectories.json").exists():
+                todo.append(("BASE" if run_no(d) == 1 else f"BASE run {run_no(d)}", d, out / "judge_base" / d.name))
+        for d in sorted((out / "cond").glob("*/run_*"), key=lambda p: (run_no(p), p.parent.name)):
+            if (d / "generated_trajectories.json").exists():
+                k = run_no(d)
+                todo.append((d.parent.name if k == 1 else f"{d.parent.name} run {k}", d,
+                             out / ("judge_cond" if k == 1 else f"judge_cond_run_{k}") / d.parent.name))
     todo = [t for t in todo if not glob.glob(f"{t[2]}/**/*_outputs_results.json", recursive=True)]
     if not todo:
         sys.exit("nothing to judge: no trajectory files, or all are already judged")
