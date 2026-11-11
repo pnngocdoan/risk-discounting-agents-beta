@@ -107,7 +107,7 @@ def main():
     q = lambda prompt: sheet.ask(a.api_url, key, a.model, a.effort, prompt)
     batch = {str(t["id"]): t for t in json.loads(Path(a.batch).read_text())}
 
-    # ---- p lines: generic risky action per category, specific harm per task ----
+    # ---- p lines: the risk category as the action, a few words of harm per task ----
     old_p = {r["task"]: r for r in tabs.get("p_lines", [])}
     p_rows = {}
     for tid, t in batch.items():
