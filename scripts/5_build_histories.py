@@ -1,4 +1,7 @@
-"""Write the p lines and the outcome lines, and line up the histories for each task.
+"""Write the three lines each condition needs, and line up the histories for each task:
+  risky action  (T0: "<risky action> may lead to <harm>")   p line  (T1, T3: with the number p)   outcome line  (T2, T3: after each history)
+The run ends with one table showing all three side by side.
+
 
   export ANTHROPIC_API_KEY=...
   python scripts/5_build_histories.py --batch data/batches/batch_5_1.json --audit <audit.xlsx>
@@ -127,10 +130,13 @@ def main():
     sheet.write_tab(a.audit, "p_lines", [p_rows[t] for t in sorted(p_rows, key=sheet.sort_key)])
     sheet.write_tab(a.audit, "histories", sorted(h_rows.values(), key=lambda r: (sheet.sort_key(r["task"]), int(r["order"]))))
     print(f"wrote the tabs 'p_lines' ({len(todo_p)} new) and 'histories' ({len(todo_o)} new outcome lines) in {a.audit}")
-    for tid, r in p_rows.items():
-        print(f"  task {tid}: {r['p_line']}")
+    print(f"\n{'task':>5} | risky action | p line | outcome line")
     for r in sorted(h_rows.values(), key=lambda r: (sheet.sort_key(r["task"]), int(r["order"]))):
-        print(f"  task {r['task']} history {r['order']} (run {r['run']}): {r['outcome_line']}")
+        pr = p_rows.get(r["task"], {})
+        print(f"{r['task']:>5} | {pr.get('risky_action', '')} | {pr.get('p_line', '')} | {r['outcome_line']}   (history {r['order']}, run {r['run']})")
+    for tid in sorted(p_rows, key=sheet.sort_key):
+        if not any(k[0] == tid for k in h_rows):
+            print(f"{tid:>5} | {p_rows[tid]['risky_action']} | {p_rows[tid]['p_line']} | (no unsafe history for this task)")
     print("Open the sheet, read the lines, fix any cell, save it in the same place. Script 6 reads it.")
 
 
