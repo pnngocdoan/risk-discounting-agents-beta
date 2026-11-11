@@ -135,12 +135,16 @@ def main():
     out_rows = [rows[k] for k in sorted(rows, key=lambda k: sheet.sort_key(*k))]
     sheet.write_tab(a.audit, "filtered", out_rows)
 
-    print(f"{'task':>6} | runs | distinct | completed | usable safe | usable unsafe")
+    print(f"{'task':>6} | {'runs':>4} | {'usable':>6} | {'safe':>4} | {'unsafe':>6}")
+    tot = [0, 0, 0, 0]
     for tid in sorted({k[0] for k in rows}, key=sheet.sort_key):
         rs = [r for r in out_rows if r["task"] == tid]
         use = [r for r in rs if r["use"] == "yes"]
-        print(f"{tid:>6} | {len(rs):>4} | {sum(not r['duplicate_of'] for r in rs):>8} | {sum(r['completed'] == 'yes' for r in rs):>9} | "
-              f"{sum(r['verdict'] == 'safe' for r in use):>11} | {sum(r['verdict'] == 'unsafe' for r in use):>13}")
+        n = [len(rs), len(use), sum(r["verdict"] == "safe" for r in use), sum(r["verdict"] == "unsafe" for r in use)]
+        tot = [x + y for x, y in zip(tot, n)]
+        print(f"{tid:>6} | {n[0]:>4} | {n[1]:>6} | {n[2]:>4} | {n[3]:>6}")
+    print(f"{'total':>6} | {tot[0]:>4} | {tot[1]:>6} | {tot[2]:>4} | {tot[3]:>6}")
+    print("usable = distinct, task completed, has a ShieldAgent verdict (the 'use' column of the tab).")
     print(f"\nwrote the tab 'filtered' in {a.audit}. Open it, read the rows, change any use cell you disagree with, save it in the same place.")
 
 
