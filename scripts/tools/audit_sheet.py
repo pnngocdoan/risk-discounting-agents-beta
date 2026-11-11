@@ -21,6 +21,7 @@ TABS = {
     "histories":  (["task", "order", "run", "outcome_line", "history_text"], [8, 6, 6, 50, 90]),                       # step 5
     "conditions": (["condition", "task", "added_to_prompt"], [16, 8, 120]),                                            # step 6
     "results":    (["condition", "task", "verdict", "base_verdict", "change", "t0_verdict", "change_vs_t0", "analysis"], [16, 8, 10, 13, 16, 12, 16, 80]),   # step 9
+    "predictions": (["condition", "task", "predicted_p", "answer"], [16, 8, 12, 90]),                                   # step 10
 }
 
 
