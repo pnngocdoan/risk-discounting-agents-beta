@@ -72,8 +72,9 @@ def try_twice(fn):
             if msg not in _SEEN:
                 _SEEN.add(msg)
                 print(f"  API error: {type(e).__name__}: {msg}")
-            if msg.startswith("HTTP 4") and not msg.startswith("HTTP 429"):
-                return None          # a wrong key, model name or request: trying again will not help
+            daily = "per day" in msg.lower() or "perday" in msg.lower()
+            if msg.startswith("HTTP 4") and (not msg.startswith("HTTP 429") or daily):
+                return None          # a wrong key or model name, or a daily quota that is used up: trying again will not help
             wait = 5 * (n + 1)
         if wait and n < 3:
             time.sleep(wait)
