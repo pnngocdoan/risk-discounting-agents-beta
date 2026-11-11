@@ -5,8 +5,13 @@
 
 --conds holds one ShieldAgent results folder per condition (T1_p10, T2_k2, T3_k2_p10, ...). Prints one
 row per task (U = unsafe, S = safe, - = not run or no verdict), the unsafe count per condition, and the
-changes against BASE: safe to unsafe is "more unsafe", unsafe to safe is "less unsafe". Greedy, one run
-per task and condition, so this is a count of tasks, not a statistic.
+changes against BASE: safe to unsafe is "more unsafe", unsafe to safe is "less unsafe". With one run per task and
+condition this is a count of tasks, not a statistic.
+
+With several runs per task (7_run_conditions.py --repeats 3) the verdict of a task is the majority of its runs
+(unsafe if more than half of the runs are unsafe); the tab "results" also shows how many runs were unsafe
+("2 of 3") for the condition, BASE and T0. The other runs are read from judge_base/run_k and judge_cond_run_k
+(written by 8_judge_conditions.py); the folders --base and --conds are run 1.
 
 With --audit <audit.xlsx> it also writes the tab "results": one row per condition and task with the ShieldAgent
 verdict (safe / unsafe), the BASE verdict and the change against BASE, the T0 verdict and the change against T0 (more unsafe / less unsafe / same) and an empty
@@ -33,6 +38,17 @@ def verdicts(folder):
     return out
 
 
+def runs_verdicts(base_dir, conds_dir):
+    """[(base folder, conds folder) for run 1, 2, ...]: run 1 is what was given, the others sit next to it."""
+    base_dir, conds_dir = Path(base_dir), Path(conds_dir)
+    pairs = [(base_dir, conds_dir)]
+    k = 2
+    while (base_dir.parent / f"run_{k}").exists() or (conds_dir.parent / f"judge_cond_run_{k}").exists():
+        pairs.append((base_dir.parent / f"run_{k}", conds_dir.parent / f"judge_cond_run_{k}"))
+        k += 1
+    return pairs
+
+
 def order(name):
     group = name.split("_")[0]
     nums = [int(x) for x in "".join(c if c.isdigit() else " " for c in name).split()]
@@ -45,9 +61,23 @@ def main():
     ap.add_argument("--conds", required=True, help="folder with one ShieldAgent results folder per condition")
     ap.add_argument("--audit", help="audit.xlsx: also write the tab 'results' there")
     a = ap.parse_args()
-    cols = {"BASE": verdicts(a.base)}
-    for d in sorted((p for p in Path(a.conds).iterdir() if p.is_dir()), key=lambda p: order(p.name)):
-        cols[d.name] = verdicts(d)
+    per_run = {}   # condition -> [verdicts of run 1, run 2, ...]
+    for bdir, cdir in runs_verdicts(a.base, a.conds):
+        per_run.setdefault("BASE", []).append(verdicts(bdir))
+        if cdir.is_dir():
+            for d in sorted((p for p in cdir.iterdir() if p.is_dir()), key=lambda p: order(p.name)):
+                per_run.setdefault(d.name, []).append(verdicts(d))
+    nruns = len(runs_verdicts(a.base, a.conds))
+    unsafe_n, total_n = {}, {}   # (condition, task) -> unsafe runs, judged runs
+    cols = {}
+    for n in sorted(per_run, key=lambda n: (-1, []) if n == "BASE" else order(n)):
+        cols[n] = {}
+        for t in {t for r in per_run[n] for t in r}:
+            vs = [r[t] for r in per_run[n] if t in r]
+            unsafe_n[n, t], total_n[n, t] = vs.count("U"), len(vs)
+            cols[n][t] = "U" if 2 * vs.count("U") > len(vs) else "S"
+    if nruns > 1:
+        print(f"{nruns} runs per task and condition: the verdict is the majority of the judged runs\n")
     tasks = sorted({t for v in cols.values() for t in v})
     names = list(cols)
     w = max(len(n) for n in names)
@@ -86,10 +116,12 @@ def main():
         for n in names:
             for t in sorted(cols[n], key=sheet.sort_key):
                 b, z, v = base.get(t), t0.get(t), cols[n][t]
+                frac = lambda c: f"{unsafe_n[c, t]} of {total_n[c, t]}" if (c, t) in total_n else ""
                 diff = lambda ref: "" if not ref else ("same" if ref == v else "more unsafe" if v == "U" else "less unsafe")
-                rows.append(dict(condition=n, task=str(t), verdict=word[v], base_verdict=word.get(b, ""),
+                rows.append(dict(condition=n, task=str(t), verdict=word[v], unsafe_runs=frac(n),
+                                 base_verdict=word.get(b, ""), base_unsafe_runs=frac("BASE"),
                                  change="" if n == "BASE" else diff(b),
-                                 t0_verdict=word.get(z, ""), change_vs_t0="" if n in ("BASE", "T0") or not t0 else diff(z),
+                                 t0_verdict=word.get(z, ""), t0_unsafe_runs=frac("T0"), change_vs_t0="" if n in ("BASE", "T0") or not t0 else diff(z),
                                  analysis=old.get((n, str(t)), {}).get("analysis", "")))
         sheet.write_tab(a.audit, "results", rows)
         print(f"\nwrote the tab 'results' ({len(rows)} rows) in {a.audit}")
