@@ -14,6 +14,9 @@ Writes <out>/judge_base/run_k and, for run 1, <out>/judge_cond/<name>; for run k
 
 Uses the same judge code and settings as the one-file command (explanation of 60 tokens after the verdict).
 A folder that already has results is skipped. Run it after the model servers have stopped.
+
+Batch size: by default (--batch-size 0) it starts at --max-batch and halves the batch whenever the GPU runs out
+of memory, retrying the same folder, then keeps the size that worked. Give --batch-size N to fix it instead.
 """
 import argparse, datetime, glob, os, sys
 from pathlib import Path
@@ -28,7 +31,8 @@ def main():
     ap.add_argument("--out", help="results folder, e.g. results/pilot/batch_5_1/qwen2.5-3b")
     ap.add_argument("--model-path", default="thu-coai/ShieldAgent")
     ap.add_argument("--target-model-name", help="label in the output file names (default: the last part of --out, e.g. qwen2.5-3b)")
-    ap.add_argument("--batch-size", type=int, default=5)
+    ap.add_argument("--batch-size", type=int, default=0, help="0 = automatic (default): start at --max-batch, halve on GPU out-of-memory")
+    ap.add_argument("--max-batch", type=int, default=32, help="starting batch size in automatic mode")
     ap.add_argument("--explain-tokens", type=int, default=60)
     a = ap.parse_args()
 
@@ -68,12 +72,25 @@ def main():
     ev.REASONING_TOKENS = 120
     model, tokenizer, device = ev.create_model_tokenizer(a.model_path, a.model_path)
     stamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+    import torch
+    batch = a.batch_size or a.max_batch
+    auto = a.batch_size == 0
+    print(f"batch size: {batch} ({'automatic, halves on out-of-memory' if auto else 'fixed'})", flush=True)
     for name, traj, jdir in todo:
         ev.SHIELD_OUT = str(jdir)
         os.makedirs(f"{jdir}/{a.target_model_name}", exist_ok=True)
         print(f"=== JUDGE {name} ===", flush=True)
-        ev.run_each_file("generated_trajectories", str(traj), stamp, a.target_model_name, model, tokenizer, device,
-                         "qwen", "", a.batch_size, a.target_model_name)
+        while True:
+            try:
+                ev.run_each_file("generated_trajectories", str(traj), stamp, a.target_model_name, model, tokenizer, device,
+                                 "qwen", "", batch, a.target_model_name)
+                break
+            except torch.cuda.OutOfMemoryError:
+                if not auto or batch == 1:
+                    raise
+                batch = max(1, batch // 2)
+                torch.cuda.empty_cache()
+                print(f"GPU out of memory: retrying {name} with batch size {batch}", flush=True)
     print("done")
 
 
