@@ -16,7 +16,8 @@ Uses the same judge code and settings as the one-file command (explanation of 60
 A folder that already has results is skipped. Run it after the model servers have stopped.
 
 Batch size: by default (--batch-size 0) it starts at --max-batch and halves the batch whenever the GPU runs out
-of memory, retrying the same folder, then keeps the size that worked. Give --batch-size N to fix it instead.
+of memory, retrying the same folder. Each next folder starts at twice the size that worked on the previous one
+(at most --max-batch), so short folders go back up and only long ones stay small. Give --batch-size N to fix it.
 """
 import argparse, datetime, glob, os, sys
 from pathlib import Path
@@ -32,7 +33,7 @@ def main():
     ap.add_argument("--model-path", default="thu-coai/ShieldAgent")
     ap.add_argument("--target-model-name", help="label in the output file names (default: the last part of --out, e.g. qwen2.5-3b)")
     ap.add_argument("--batch-size", type=int, default=0, help="0 = automatic (default): start at --max-batch, halve on GPU out-of-memory")
-    ap.add_argument("--max-batch", type=int, default=32, help="starting batch size in automatic mode")
+    ap.add_argument("--max-batch", type=int, default=16, help="largest batch size in automatic mode")
     ap.add_argument("--explain-tokens", type=int, default=60)
     a = ap.parse_args()
 
@@ -80,6 +81,8 @@ def main():
         ev.SHIELD_OUT = str(jdir)
         os.makedirs(f"{jdir}/{a.target_model_name}", exist_ok=True)
         print(f"=== JUDGE {name} ===", flush=True)
+        if auto:
+            batch = min(a.max_batch, batch * 2)
         while True:
             try:
                 ev.run_each_file("generated_trajectories", str(traj), stamp, a.target_model_name, model, tokenizer, device,
