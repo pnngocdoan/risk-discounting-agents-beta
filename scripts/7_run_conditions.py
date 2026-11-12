@@ -71,8 +71,8 @@ def main():
         t1 = time.time()
         failed, done = [], 0
         with ThreadPoolExecutor(max_workers=workers) as ex:
-            futs = {ex.submit(ac.run_job, f"api:{name}", 1, t, folder, a.greedy, a.job_timeout, *servers[i % len(servers)]): (cname, t["id"])
-                    for i, (cname, folder, t) in enumerate(jobs)}
+            futs = {ex.submit(ac.run_job, f"api:{name}", k, t, folder, a.greedy, a.job_timeout, *servers[i % len(servers)]): (f"{cname} run {k}", t["id"])
+                    for i, (cname, k, folder, t) in enumerate(jobs)}
             for fu in as_completed(futs):
                 cname, tid = futs[fu]
                 _, _, secs, status = fu.result()
